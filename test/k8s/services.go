@@ -98,8 +98,10 @@ var _ = SkipDescribeIf(helpers.RunsOn54Kernel, "K8sServicesTest", func() {
 		AfterAll(func() {
 			for _, yaml := range yamls {
 				kubectl.Delete(yaml)
+				kubectl.WaitForDelete(yaml).ExpectSuccess("Resource %s hasn't been deleted", yaml)
 			}
-			ExpectAllPodsTerminated(kubectl)
+
+			//ExpectAllPodsTerminated(kubectl)
 		})
 
 		// This is testing bpf_lxc LB (= KPR=disabled) when both client and
@@ -282,8 +284,9 @@ var _ = SkipDescribeIf(helpers.RunsOn54Kernel, "K8sServicesTest", func() {
 				for _, yaml := range yamls {
 					path := helpers.ManifestGet(kubectl.BasePath(), yaml)
 					kubectl.Delete(path)
+					kubectl.WaitForDelete(path).ExpectSuccess("Resource %s hasn't been deleted", path)
 				}
-				ExpectAllPodsTerminated(kubectl)
+				//ExpectAllPodsTerminated(kubectl)
 			})
 
 			// In adition to the bpf_sock bypass, this test is testing whether bpf_lxc
@@ -538,8 +541,9 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`,
 		AfterAll(func() {
 			for _, yaml := range yamls {
 				kubectl.Delete(yaml)
+				kubectl.WaitForDelete(yaml).ExpectSuccess("Resource %s hasn't been deleted", yaml)
 			}
-			ExpectAllPodsTerminated(kubectl)
+			//ExpectAllPodsTerminated(kubectl)
 		})
 
 		It("Tests NodePort with sessionAffinity from outside", func() {
@@ -901,7 +905,8 @@ Secondary Interface %s :: IPv4: (%s, %s), IPv6: (%s, %s)`,
 		AfterEach(func() {
 			wg.Wait()
 			kubectl.Delete(gracefulTermYAML)
-			ExpectAllPodsTerminated(kubectl)
+			kubectl.WaitForDelete(gracefulTermYAML).ExpectSuccess("Resource %s hasn't been deleted", gracefulTermYAML)
+			//ExpectAllPodsTerminated(kubectl)
 		})
 
 		It("Checks client terminates gracefully on service endpoint deletion", func() {
