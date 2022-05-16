@@ -794,7 +794,7 @@ do_netdev_encrypt_fib(struct __ctx_buff *ctx __maybe_unused,
 
 	fib_params.ifindex = *encrypt_iface;
 
-	err = fib_lookup(ctx, &fib_params, sizeof(fib_params),
+	err = bpf_fib_lookup(ctx, &fib_params, sizeof(fib_params),
 		    BPF_FIB_LOOKUP_DIRECT | BPF_FIB_LOOKUP_OUTPUT);
 	if (err != 0) {
 		ret = DROP_NO_FIB;

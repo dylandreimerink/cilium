@@ -58,35 +58,35 @@ static __always_inline __maybe_unused __be16
 __snat_try_keep_port(__u16 start, __u16 end, __u16 val)
 {
 	return val >= start && val <= end ? val :
-	       __snat_clamp_port_range(start, end, (__u16)get_prandom_u32());
+	       __snat_clamp_port_range(start, end, (__u16)bpf_get_prandom_u32());
 }
 
 static __always_inline __maybe_unused void *
-__snat_lookup(const void *map, const void *tuple)
+__snat_lookup(void *map, const void *tuple)
 {
-	return map_lookup_elem(map, tuple);
+	return bpf_map_lookup_elem(map, tuple);
 }
 
 static __always_inline __maybe_unused int
-__snat_update(const void *map, const void *otuple, const void *ostate,
-	      const void *rtuple, const void *rstate)
+__snat_update(void *map, const void *otuple, const void *ostate,
+			  const void *rtuple, const void *rstate)
 {
 	int ret;
 
-	ret = map_update_elem(map, rtuple, rstate, BPF_NOEXIST);
+	ret = bpf_map_update_elem(map, rtuple, rstate, BPF_NOEXIST);
 	if (!ret) {
-		ret = map_update_elem(map, otuple, ostate, BPF_NOEXIST);
+		ret = bpf_map_update_elem(map, otuple, ostate, BPF_NOEXIST);
 		if (ret)
-			map_delete_elem(map, rtuple);
+			bpf_map_delete_elem(map, rtuple);
 	}
 	return ret;
 }
 
 static __always_inline __maybe_unused void
-__snat_delete(const void *map, const void *otuple, const void *rtuple)
+__snat_delete(void *map, const void *otuple, const void *rtuple)
 {
-	map_delete_elem(map, otuple);
-	map_delete_elem(map, rtuple);
+	bpf_map_delete_elem(map, otuple);
+	bpf_map_delete_elem(map, rtuple);
 }
 
 struct ipv4_nat_entry {
@@ -248,7 +248,7 @@ static __always_inline int snat_v4_new_mapping(struct __ctx_buff *ctx,
 		port = __snat_clamp_port_range(target->min_port,
 					       target->max_port,
 					       retries ? port + 1 :
-					       (__u16)get_prandom_u32());
+					       (__u16)bpf_get_prandom_u32());
 		rtuple.dport = ostate->to_sport = bpf_htons(port);
 	}
 
@@ -497,7 +497,7 @@ static __always_inline __maybe_unused int snat_v4_create_dsr(struct __ctx_buff *
 	state.to_saddr = to_saddr;
 	state.to_sport = to_sport;
 
-	ret = map_update_elem(&SNAT_MAPPING_IPV4, &tuple, &state, 0);
+	ret = bpf_map_update_elem(&SNAT_MAPPING_IPV4, &tuple, &state, 0);
 	if (ret)
 		return ret;
 
@@ -735,7 +735,7 @@ static __always_inline int snat_v6_new_mapping(struct __ctx_buff *ctx,
 		port = __snat_clamp_port_range(target->min_port,
 					       target->max_port,
 					       retries ? port + 1 :
-					       (__u16)get_prandom_u32());
+					       (__u16)bpf_get_prandom_u32());
 		rtuple.dport = ostate->to_sport = bpf_htons(port);
 	}
 
@@ -969,7 +969,7 @@ static __always_inline __maybe_unused int snat_v6_create_dsr(struct __ctx_buff *
 	ipv6_addr_copy(&state.to_saddr, to_saddr);
 	state.to_sport = to_sport;
 
-	ret = map_update_elem(&SNAT_MAPPING_IPV6, &tuple, &state, 0);
+	ret = bpf_map_update_elem(&SNAT_MAPPING_IPV6, &tuple, &state, 0);
 	if (ret)
 		return ret;
 
@@ -1088,25 +1088,25 @@ snat_v6_has_v4_match(const struct ipv4_ct_tuple *tuple4 __maybe_unused)
 }
 
 static __always_inline __maybe_unused void
-ct_delete4(const void *map, struct ipv4_ct_tuple *tuple, struct __ctx_buff *ctx)
+ct_delete4(void *map, struct ipv4_ct_tuple *tuple, struct __ctx_buff *ctx)
 {
 	int err;
 
-	err = map_delete_elem(map, tuple);
+	err = bpf_map_delete_elem(map, tuple);
 	if (err < 0)
-		cilium_dbg(ctx, DBG_ERROR_RET, BPF_FUNC_map_delete_elem, err);
+		cilium_dbg(ctx, DBG_ERROR_RET, (unsigned long)bpf_map_delete_elem, err);
 	else
 		snat_v4_delete_tuples(tuple);
 }
 
 static __always_inline __maybe_unused void
-ct_delete6(const void *map, struct ipv6_ct_tuple *tuple, struct __ctx_buff *ctx)
+ct_delete6(void *map, struct ipv6_ct_tuple *tuple, struct __ctx_buff *ctx)
 {
 	int err;
 
-	err = map_delete_elem(map, tuple);
+	err = bpf_map_delete_elem(map, tuple);
 	if (err < 0)
-		cilium_dbg(ctx, DBG_ERROR_RET, BPF_FUNC_map_delete_elem, err);
+		cilium_dbg(ctx, DBG_ERROR_RET, (unsigned long)bpf_map_delete_elem, err);
 	else
 		snat_v6_delete_tuples(tuple);
 }

@@ -31,7 +31,7 @@ redirect_direct_v6(struct __ctx_buff *ctx __maybe_unused,
 	ipv6_addr_copy((union v6addr *)&fib_params.ipv6_dst,
 		       (union v6addr *)&ip6->daddr);
 
-	ret = fib_lookup(ctx, &fib_params, sizeof(fib_params),
+	ret = bpf_fib_lookup(ctx, &fib_params, sizeof(fib_params),
 			 BPF_FIB_LOOKUP_DIRECT);
 	switch (ret) {
 	case BPF_FIB_LKUP_RET_SUCCESS:
@@ -54,7 +54,7 @@ redirect_direct_v6(struct __ctx_buff *ctx __maybe_unused,
 	if (unlikely(ret != CTX_ACT_OK))
 		return ret;
 	if (no_neigh)
-		return redirect_neigh(oif, nh, nh ? sizeof(*nh) : 0, 0);
+		return bpf_redirect_neigh(oif, nh, nh ? sizeof(*nh) : 0, 0);
 # ifndef ENABLE_SKIP_FIB
 	if (eth_store_daddr(ctx, fib_params.dmac, 0) < 0)
 		return CTX_ACT_DROP;
@@ -72,10 +72,10 @@ redirect_direct_v4(struct __ctx_buff *ctx __maybe_unused,
 		   int l3_off __maybe_unused,
 		   struct iphdr *ip4 __maybe_unused)
 {
-	/* For deployments with just single external dev, redirect_neigh()
+	/* For deployments with just single external dev, bpf_redirect_neigh()
 	 * will resolve the GW and do L2 resolution for us. For multi-device
 	 * deployments we perform a FIB lookup prior to the redirect. If the
-	 * neigh entry cannot be resolved, we ask redirect_neigh() to do it,
+	 * neigh entry cannot be resolved, we ask bpf_redirect_neigh() to do it,
 	 * otherwise we can directly call redirect().
 	 */
 	bool no_neigh = is_defined(ENABLE_SKIP_FIB);
@@ -90,7 +90,7 @@ redirect_direct_v4(struct __ctx_buff *ctx __maybe_unused,
 		.ipv4_dst	= ip4->daddr,
 	};
 
-	ret = fib_lookup(ctx, &fib_params, sizeof(fib_params),
+	ret = bpf_fib_lookup(ctx, &fib_params, sizeof(fib_params),
 			 BPF_FIB_LOOKUP_DIRECT);
 	switch (ret) {
 	case BPF_FIB_LKUP_RET_SUCCESS:
@@ -114,7 +114,7 @@ redirect_direct_v4(struct __ctx_buff *ctx __maybe_unused,
 	if (unlikely(ret != CTX_ACT_OK))
 		return ret;
 	if (no_neigh)
-		return redirect_neigh(oif, nh, nh ? sizeof(*nh) : 0, 0);
+		return bpf_redirect_neigh(oif, nh, nh ? sizeof(*nh) : 0, 0);
 # ifndef ENABLE_SKIP_FIB
 	if (eth_store_daddr(ctx, fib_params.dmac, 0) < 0)
 		return CTX_ACT_DROP;

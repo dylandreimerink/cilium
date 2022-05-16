@@ -31,7 +31,7 @@ policy_sk_egress(__u32 identity, __u32 ip,  __u16 dport)
 		return CTX_ACT_OK;
 
 	/* Start with L3/L4 lookup. */
-	policy = map_lookup_elem(map, &key);
+	policy = bpf_map_lookup_elem(map, &key);
 	if (likely(policy)) {
 		/* FIXME: Need byte counter */
 		__sync_fetch_and_add(&policy->packets, 1);
@@ -42,7 +42,7 @@ policy_sk_egress(__u32 identity, __u32 ip,  __u16 dport)
 
 	/* L4-only lookup. */
 	key.sec_label = 0;
-	policy = map_lookup_elem(map, &key);
+	policy = bpf_map_lookup_elem(map, &key);
 	if (likely(policy)) {
 		/* FIXME: Need byte counter */
 		__sync_fetch_and_add(&policy->packets, 1);
@@ -55,7 +55,7 @@ policy_sk_egress(__u32 identity, __u32 ip,  __u16 dport)
 	/* If L4 policy check misses, fall back to L3. */
 	key.dport = 0;
 	key.protocol = 0;
-	policy = map_lookup_elem(map, &key);
+	policy = bpf_map_lookup_elem(map, &key);
 	if (likely(policy)) {
 		/* FIXME: Need byte counter */
 		__sync_fetch_and_add(&policy->packets, 1);
@@ -66,7 +66,7 @@ policy_sk_egress(__u32 identity, __u32 ip,  __u16 dport)
 
 	/* Final fallback if allow-all policy is in place. */
 	key.sec_label = 0;
-	policy = map_lookup_elem(map, &key);
+	policy = bpf_map_lookup_elem(map, &key);
 	if (likely(policy)) {
 		/* FIXME: Need byte counter */
 		__sync_fetch_and_add(&policy->packets, 1);
@@ -87,7 +87,7 @@ account(struct __ctx_buff *ctx, struct policy_entry *policy)
 }
 
 static __always_inline int
-__policy_can_access(const void *map, struct __ctx_buff *ctx, __u32 local_id,
+__policy_can_access(void *map, struct __ctx_buff *ctx, __u32 local_id,
 		    __u32 remote_id, __u16 dport, __u8 proto, int dir,
 		    bool is_untracked_fragment, __u8 *match_type)
 {
@@ -164,7 +164,7 @@ __policy_can_access(const void *map, struct __ctx_buff *ctx, __u32 local_id,
 	/* L4 lookup can't be done on untracked fragments. */
 	if (!is_untracked_fragment) {
 		/* Start with L3/L4 lookup. */
-		policy = map_lookup_elem(map, &key);
+		policy = bpf_map_lookup_elem(map, &key);
 		if (likely(policy)) {
 			cilium_dbg3(ctx, DBG_L4_CREATE, remote_id, local_id,
 				    dport << 16 | proto);
@@ -178,7 +178,7 @@ __policy_can_access(const void *map, struct __ctx_buff *ctx, __u32 local_id,
 
 		/* L4-only lookup. */
 		key.sec_label = 0;
-		policy = map_lookup_elem(map, &key);
+		policy = bpf_map_lookup_elem(map, &key);
 		if (likely(policy)) {
 			account(ctx, policy);
 			*match_type = POLICY_MATCH_L4_ONLY;
@@ -192,7 +192,7 @@ __policy_can_access(const void *map, struct __ctx_buff *ctx, __u32 local_id,
 	/* If L4 policy check misses, fall back to L3. */
 	key.dport = 0;
 	key.protocol = 0;
-	policy = map_lookup_elem(map, &key);
+	policy = bpf_map_lookup_elem(map, &key);
 	if (likely(policy)) {
 		account(ctx, policy);
 		*match_type = POLICY_MATCH_L3_ONLY;
@@ -203,7 +203,7 @@ __policy_can_access(const void *map, struct __ctx_buff *ctx, __u32 local_id,
 
 	/* Final fallback if allow-all policy is in place. */
 	key.sec_label = 0;
-	policy = map_lookup_elem(map, &key);
+	policy = bpf_map_lookup_elem(map, &key);
 	if (policy) {
 		account(ctx, policy);
 		*match_type = POLICY_MATCH_ALL;

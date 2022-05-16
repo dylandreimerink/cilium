@@ -474,7 +474,7 @@ static __always_inline int lb6_rev_nat(struct __ctx_buff *ctx, int l4_off,
 	struct lb6_reverse_nat *nat;
 
 	cilium_dbg_lb(ctx, DBG_LB6_REVERSE_NAT_LOOKUP, index, 0);
-	nat = map_lookup_elem(&LB6_REVERSE_NAT_MAP, &index);
+	nat = bpf_map_lookup_elem(&LB6_REVERSE_NAT_MAP, &index);
 	if (nat == NULL)
 		return 0;
 
@@ -531,7 +531,7 @@ bool lb6_src_range_ok(const struct lb6_service *svc __maybe_unused,
 		.addr = *saddr,
 	};
 
-	if (map_lookup_elem(&LB6_SRC_RANGE_MAP, &key))
+	if (bpf_map_lookup_elem(&LB6_SRC_RANGE_MAP, &key))
 		return true;
 
 	return false;
@@ -558,13 +558,13 @@ struct lb6_service *lb6_lookup_service(struct lb6_key *key,
 
 	key->scope = LB_LOOKUP_SCOPE_EXT;
 	key->backend_slot = 0;
-	svc = map_lookup_elem(&LB6_SERVICES_MAP_V2, key);
+	svc = bpf_map_lookup_elem(&LB6_SERVICES_MAP_V2, key);
 	if (svc) {
 		if (!scope_switch || !lb6_svc_is_local_scope(svc))
 			/* Packets for L7 LB are redirected even when there are no backends. */
 			return (svc->count || lb6_svc_is_l7loadbalancer(svc)) ? svc : NULL;
 		key->scope = LB_LOOKUP_SCOPE_INT;
-		svc = map_lookup_elem(&LB6_SERVICES_MAP_V2, key);
+		svc = bpf_map_lookup_elem(&LB6_SERVICES_MAP_V2, key);
 		if (svc && (svc->count || lb6_svc_is_l7loadbalancer(svc)))
 			return svc;
 	}
@@ -574,7 +574,7 @@ struct lb6_service *lb6_lookup_service(struct lb6_key *key,
 
 static __always_inline struct lb6_backend *__lb6_lookup_backend(__u32 backend_id)
 {
-	return map_lookup_elem(&LB6_BACKEND_MAP_V2, &backend_id);
+	return bpf_map_lookup_elem(&LB6_BACKEND_MAP_V2, &backend_id);
 }
 
 static __always_inline struct lb6_backend *
@@ -592,7 +592,7 @@ lb6_lookup_backend(struct __ctx_buff *ctx __maybe_unused, __u32 backend_id)
 static __always_inline
 struct lb6_service *__lb6_lookup_backend_slot(struct lb6_key *key)
 {
-	return map_lookup_elem(&LB6_SERVICES_MAP_V2, key);
+	return bpf_map_lookup_elem(&LB6_SERVICES_MAP_V2, key);
 }
 
 static __always_inline
@@ -620,7 +620,7 @@ lb6_select_backend_id(struct __ctx_buff *ctx,
 		      const struct ipv6_ct_tuple *tuple __maybe_unused,
 		      const struct lb6_service *svc)
 {
-	__u16 slot = (get_prandom_u32() % svc->count) + 1;
+	__u16 slot = (bpf_get_prandom_u32() % svc->count) + 1;
 	struct lb6_service *be = lb6_lookup_backend_slot(ctx, key, slot);
 
 	return be ? be->backend_id : 0;
@@ -636,11 +636,11 @@ lb6_select_backend_id(struct __ctx_buff *ctx __maybe_unused,
 	__u32 *backend_ids;
 	void *maglev_lut;
 
-	maglev_lut = map_lookup_elem(&LB6_MAGLEV_MAP_OUTER, &index);
+	maglev_lut = bpf_map_lookup_elem(&LB6_MAGLEV_MAP_OUTER, &index);
 	if (unlikely(!maglev_lut))
 		return 0;
 
-	backend_ids = map_lookup_elem(maglev_lut, &zero);
+	backend_ids = bpf_map_lookup_elem(maglev_lut, &zero);
 	if (unlikely(!backend_ids))
 		return 0;
 
@@ -664,7 +664,7 @@ static __always_inline int lb6_xlate(struct __ctx_buff *ctx,
 
 	ipv6_store_daddr(ctx, new_dst->addr, l3_off);
 	if (csum_off) {
-		__be32 sum = csum_diff(key->address.addr, 16, new_dst->addr,
+		__be32 sum = csum_diff((void *) key->address.addr, 16, new_dst->addr,
 				       16, 0);
 
 		if (csum_l4_replace(ctx, l4_off, csum_off, 0, sum,
@@ -701,7 +701,7 @@ __lb6_affinity_backend_id(const struct lb6_service *svc, bool netns_cookie,
 
 	ipv6_addr_copy(&key.client_id.client_ip, &id->client_ip);
 
-	val = map_lookup_elem(&LB6_AFFINITY_MAP, &key);
+	val = bpf_map_lookup_elem(&LB6_AFFINITY_MAP, &key);
 	if (val != NULL) {
 		__u32 now = bpf_mono_now();
 		struct lb_affinity_match match = {
@@ -711,12 +711,12 @@ __lb6_affinity_backend_id(const struct lb6_service *svc, bool netns_cookie,
 
 		if (READ_ONCE(val->last_used) +
 		    bpf_sec_to_mono(svc->affinity_timeout) <= now) {
-			map_delete_elem(&LB6_AFFINITY_MAP, &key);
+			bpf_map_delete_elem(&LB6_AFFINITY_MAP, &key);
 			return 0;
 		}
 
-		if (!map_lookup_elem(&LB_AFFINITY_MATCH_MAP, &match)) {
-			map_delete_elem(&LB6_AFFINITY_MAP, &key);
+		if (!bpf_map_lookup_elem(&LB_AFFINITY_MATCH_MAP, &match)) {
+			bpf_map_delete_elem(&LB6_AFFINITY_MAP, &key);
 			return 0;
 		}
 
@@ -750,7 +750,7 @@ __lb6_update_affinity(const struct lb6_service *svc, bool netns_cookie,
 
 	ipv6_addr_copy(&key.client_id.client_ip, &id->client_ip);
 
-	map_update_elem(&LB6_AFFINITY_MAP, &key, &val, 0);
+	bpf_map_update_elem(&LB6_AFFINITY_MAP, &key, &val, 0);
 }
 
 static __always_inline void
@@ -798,7 +798,7 @@ lb6_to_lb4(struct __ctx_buff *ctx __maybe_unused,
 #endif
 }
 
-static __always_inline int lb6_local(const void *map, struct __ctx_buff *ctx,
+static __always_inline int lb6_local(void *map, struct __ctx_buff *ctx,
 				     int l3_off, int l4_off,
 				     struct csum_offset *csum_off,
 				     struct lb6_key *key,
@@ -1080,7 +1080,7 @@ static __always_inline int lb4_rev_nat(struct __ctx_buff *ctx, int l3_off, int l
 	struct lb4_reverse_nat *nat;
 
 	cilium_dbg_lb(ctx, DBG_LB4_REVERSE_NAT_LOOKUP, ct_state->rev_nat_index, 0);
-	nat = map_lookup_elem(&LB4_REVERSE_NAT_MAP, &ct_state->rev_nat_index);
+	nat = bpf_map_lookup_elem(&LB4_REVERSE_NAT_MAP, &ct_state->rev_nat_index);
 	if (nat == NULL)
 		return 0;
 
@@ -1133,7 +1133,7 @@ bool lb4_src_range_ok(const struct lb4_service *svc __maybe_unused,
 		.addr = saddr,
 	};
 
-	if (map_lookup_elem(&LB4_SRC_RANGE_MAP, &key))
+	if (bpf_map_lookup_elem(&LB4_SRC_RANGE_MAP, &key))
 		return true;
 
 	return false;
@@ -1178,14 +1178,14 @@ struct lb4_service *lb4_lookup_service(struct lb4_key *key,
 
 	key->scope = LB_LOOKUP_SCOPE_EXT;
 	key->backend_slot = 0;
-	svc = map_lookup_elem(&LB4_SERVICES_MAP_V2, key);
+	svc = bpf_map_lookup_elem(&LB4_SERVICES_MAP_V2, key);
 	if (svc) {
 		if (!scope_switch || !lb4_svc_is_local_scope(svc))
 			/* Packets for L7 LB are redirected even when there are no backends. */
 			return (svc->count || lb4_to_lb6_service(svc) ||
 				lb4_svc_is_l7loadbalancer(svc)) ? svc : NULL;
 		key->scope = LB_LOOKUP_SCOPE_INT;
-		svc = map_lookup_elem(&LB4_SERVICES_MAP_V2, key);
+		svc = bpf_map_lookup_elem(&LB4_SERVICES_MAP_V2, key);
 		if (svc && (svc->count || lb4_svc_is_l7loadbalancer(svc)))
 			return svc;
 	}
@@ -1195,7 +1195,7 @@ struct lb4_service *lb4_lookup_service(struct lb4_key *key,
 
 static __always_inline struct lb4_backend *__lb4_lookup_backend(__u32 backend_id)
 {
-	return map_lookup_elem(&LB4_BACKEND_MAP_V2, &backend_id);
+	return bpf_map_lookup_elem(&LB4_BACKEND_MAP_V2, &backend_id);
 }
 
 static __always_inline struct lb4_backend *
@@ -1213,7 +1213,7 @@ lb4_lookup_backend(struct __ctx_buff *ctx __maybe_unused, __u32 backend_id)
 static __always_inline
 struct lb4_service *__lb4_lookup_backend_slot(struct lb4_key *key)
 {
-	return map_lookup_elem(&LB4_SERVICES_MAP_V2, key);
+	return bpf_map_lookup_elem(&LB4_SERVICES_MAP_V2, key);
 }
 
 static __always_inline
@@ -1241,7 +1241,7 @@ lb4_select_backend_id(struct __ctx_buff *ctx,
 		      const struct ipv4_ct_tuple *tuple __maybe_unused,
 		      const struct lb4_service *svc)
 {
-	__u16 slot = (get_prandom_u32() % svc->count) + 1;
+	__u16 slot = (bpf_get_prandom_u32() % svc->count) + 1;
 	struct lb4_service *be = lb4_lookup_backend_slot(ctx, key, slot);
 
 	return be ? be->backend_id : 0;
@@ -1257,11 +1257,11 @@ lb4_select_backend_id(struct __ctx_buff *ctx __maybe_unused,
 	__u32 *backend_ids;
 	void *maglev_lut;
 
-	maglev_lut = map_lookup_elem(&LB4_MAGLEV_MAP_OUTER, &index);
+	maglev_lut = bpf_map_lookup_elem(&LB4_MAGLEV_MAP_OUTER, &index);
 	if (unlikely(!maglev_lut))
 		return 0;
 
-	backend_ids = map_lookup_elem(maglev_lut, &zero);
+	backend_ids = bpf_map_lookup_elem(maglev_lut, &zero);
 	if (unlikely(!backend_ids))
 		return 0;
 
@@ -1340,7 +1340,7 @@ __lb4_affinity_backend_id(const struct lb4_service *svc, bool netns_cookie,
 	};
 	struct lb_affinity_val *val;
 
-	val = map_lookup_elem(&LB4_AFFINITY_MAP, &key);
+	val = bpf_map_lookup_elem(&LB4_AFFINITY_MAP, &key);
 	if (val != NULL) {
 		__u32 now = bpf_mono_now();
 		struct lb_affinity_match match = {
@@ -1355,12 +1355,12 @@ __lb4_affinity_backend_id(const struct lb4_service *svc, bool netns_cookie,
 		 */
 		if (READ_ONCE(val->last_used) +
 		    bpf_sec_to_mono(svc->affinity_timeout) <= now) {
-			map_delete_elem(&LB4_AFFINITY_MAP, &key);
+			bpf_map_delete_elem(&LB4_AFFINITY_MAP, &key);
 			return 0;
 		}
 
-		if (!map_lookup_elem(&LB_AFFINITY_MATCH_MAP, &match)) {
-			map_delete_elem(&LB4_AFFINITY_MAP, &key);
+		if (!bpf_map_lookup_elem(&LB_AFFINITY_MATCH_MAP, &match)) {
+			bpf_map_delete_elem(&LB4_AFFINITY_MAP, &key);
 			return 0;
 		}
 
@@ -1394,7 +1394,7 @@ __lb4_update_affinity(const struct lb4_service *svc, bool netns_cookie,
 		.last_used	= now,
 	};
 
-	map_update_elem(&LB4_AFFINITY_MAP, &key, &val, 0);
+	bpf_map_update_elem(&LB4_AFFINITY_MAP, &key, &val, 0);
 }
 
 static __always_inline void
@@ -1443,7 +1443,7 @@ lb4_to_lb6(struct __ctx_buff *ctx __maybe_unused,
 #endif
 }
 
-static __always_inline int lb4_local(const void *map, struct __ctx_buff *ctx,
+static __always_inline int lb4_local(void *map, struct __ctx_buff *ctx,
 				     int l3_off, int l4_off,
 				     struct csum_offset *csum_off,
 				     struct lb4_key *key,

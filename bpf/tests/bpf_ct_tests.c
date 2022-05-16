@@ -67,7 +67,7 @@ int test_map(struct __ctx_buff __maybe_unused *ctx)
 		.tx_packets = 1000,
 	};
 
-	map_update_elem(&CT_MAP_TCP4, &ct_key, &ct_val, 0);
+	bpf_map_update_elem(&CT_MAP_TCP4, &ct_key, &ct_val, 0);
 	return CTX_ACT_OK;
 }
 

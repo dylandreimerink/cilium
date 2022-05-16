@@ -36,7 +36,7 @@
 #define DECLARE(type)			\
 {					\
 	type s = {};			\
-	trace_printk("%p", 1, &s);	\
+	__bpf_printk("%p", &s);	\
 }
 
 /* This function is a placeholder for C struct definitions shared with Go,

@@ -32,7 +32,7 @@
 // Define macros like the followings to make sure the original tailcall is redirected
 // to the mock tailcall function, the last 0 does not matter because we do not
 // actually use the arguments.
-#define ep_tail_call(a, b) tail_call(a, NULL, 0)
+#define ep_tail_call(a, b) bpf_tail_call(a, NULL, 0)
 
 // The file containing the functions to be tested must be included after
 // defining the above macros.
@@ -60,7 +60,7 @@ void test_send_drop_notify() {
 
   // Set the expectations for the helpers functions called before the tailcall.
   map_lookup_elem_IgnoreAndReturn(NULL);
-  map_update_elem_IgnoreAndReturn(0);
+  bpf_map_update_elem_IgnoreAndReturn(0);
 
   // We stub the tailcall here by calling callback.
   tail_call_Stub(__send_drop_notify_tailcall);

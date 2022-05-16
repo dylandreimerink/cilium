@@ -184,7 +184,7 @@ ct_entry_closing_wait_before_rebalance(const struct ct_entry *entry)
 	return READ_ONCE(entry->last_tx_report) + wait_time >= now;
 }
 
-static __always_inline __u8 __ct_lookup(const void *map, struct __ctx_buff *ctx,
+static __always_inline __u8 __ct_lookup(void *map, struct __ctx_buff *ctx,
 					const void *tuple, int action, int dir,
 					struct ct_state *ct_state,
 					bool is_tcp, union tcp_flags seen_flags,
@@ -195,7 +195,7 @@ static __always_inline __u8 __ct_lookup(const void *map, struct __ctx_buff *ctx,
 
 	relax_verifier();
 
-	entry = map_lookup_elem(map, tuple);
+	entry = bpf_map_lookup_elem(map, tuple);
 	if (entry) {
 		cilium_dbg(ctx, DBG_CT_MATCH, entry->lifetime, entry->rev_nat_index);
 #ifdef HAVE_LARGE_INSN_LIMIT
@@ -342,7 +342,7 @@ ipv6_ct_tuple_reverse(struct ipv6_ct_tuple *tuple)
 }
 
 /* Offset must point to IPv6 */
-static __always_inline int ct_lookup6(const void *map,
+static __always_inline int ct_lookup6(void *map,
 				      struct ipv6_ct_tuple *tuple,
 				      struct __ctx_buff *ctx, int l4_off,
 				      int dir, struct ct_state *ct_state,
@@ -623,7 +623,7 @@ ct_extract_ports4(struct __ctx_buff *ctx, int off, enum ct_dir dir,
  * flow is a reply.
  */
 static __always_inline int
-ct_is_reply4(const void *map, struct __ctx_buff *ctx, int off,
+ct_is_reply4(void *map, struct __ctx_buff *ctx, int off,
 	     struct ipv4_ct_tuple *tuple, bool *is_reply)
 {
 	int err = 0;
@@ -634,13 +634,13 @@ ct_is_reply4(const void *map, struct __ctx_buff *ctx, int off,
 
 	tuple->flags = TUPLE_F_IN;
 
-	*is_reply = map_lookup_elem(map, tuple) != NULL;
+	*is_reply = bpf_map_lookup_elem(map, tuple) != NULL;
 
 	return 0;
 }
 
 /* Offset must point to IPv4 header */
-static __always_inline int ct_lookup4(const void *map,
+static __always_inline int ct_lookup4(void *map,
 				      struct ipv4_ct_tuple *tuple,
 				      struct __ctx_buff *ctx, int off, enum ct_dir dir,
 				      struct ct_state *ct_state, __u32 *monitor)
@@ -766,12 +766,12 @@ out:
 }
 
 static __always_inline void
-ct_update6_backend_id(const void *map, const struct ipv6_ct_tuple *tuple,
+ct_update6_backend_id(void *map, const struct ipv6_ct_tuple *tuple,
 		      const struct ct_state *state)
 {
 	struct ct_entry *entry;
 
-	entry = map_lookup_elem(map, tuple);
+	entry = bpf_map_lookup_elem(map, tuple);
 	if (!entry)
 		return;
 
@@ -779,12 +779,12 @@ ct_update6_backend_id(const void *map, const struct ipv6_ct_tuple *tuple,
 }
 
 static __always_inline void
-ct_update6_rev_nat_index(const void *map, const struct ipv6_ct_tuple *tuple,
+ct_update6_rev_nat_index(void *map, const struct ipv6_ct_tuple *tuple,
 			 const struct ct_state *state)
 {
 	struct ct_entry *entry;
 
-	entry = map_lookup_elem(map, tuple);
+	entry = bpf_map_lookup_elem(map, tuple);
 	if (!entry)
 		return;
 
@@ -792,12 +792,12 @@ ct_update6_rev_nat_index(const void *map, const struct ipv6_ct_tuple *tuple,
 }
 
 static __always_inline void
-ct_update6_dsr(const void *map, const struct ipv6_ct_tuple *tuple,
+ct_update6_dsr(void *map, const struct ipv6_ct_tuple *tuple,
 	       const bool dsr)
 {
 	struct ct_entry *entry;
 
-	entry = map_lookup_elem(map, tuple);
+	entry = bpf_map_lookup_elem(map, tuple);
 	if (!entry)
 		return;
 
@@ -805,7 +805,7 @@ ct_update6_dsr(const void *map, const struct ipv6_ct_tuple *tuple,
 }
 
 /* Offset must point to IPv6 */
-static __always_inline int ct_create6(const void *map_main, const void *map_related,
+static __always_inline int ct_create6(void *map_main, void *map_related,
 				      struct ipv6_ct_tuple *tuple,
 				      struct __ctx_buff *ctx, const int dir,
 				      const struct ct_state *ct_state,
@@ -846,7 +846,7 @@ static __always_inline int ct_create6(const void *map_main, const void *map_rela
 	cilium_dbg3(ctx, DBG_CT_CREATED6, entry.rev_nat_index, ct_state->src_sec_id, 0);
 
 	entry.src_sec_id = ct_state->src_sec_id;
-	if (map_update_elem(map_main, tuple, &entry, 0) < 0) {
+	if (bpf_map_update_elem(map_main, tuple, &entry, 0) < 0) {
 		send_signal_ct_fill_up(ctx, SIGNAL_PROTO_V6);
 		return DROP_CT_CREATE_FAILED;
 	}
@@ -865,7 +865,7 @@ static __always_inline int ct_create6(const void *map_main, const void *map_rela
 		ipv6_addr_copy(&icmp_tuple.daddr, &tuple->daddr);
 		ipv6_addr_copy(&icmp_tuple.saddr, &tuple->saddr);
 
-		if (map_update_elem(map_related, &icmp_tuple, &entry, 0) < 0) {
+		if (bpf_map_update_elem(map_related, &icmp_tuple, &entry, 0) < 0) {
 			send_signal_ct_fill_up(ctx, SIGNAL_PROTO_V6);
 			return DROP_CT_CREATE_FAILED;
 		}
@@ -873,13 +873,13 @@ static __always_inline int ct_create6(const void *map_main, const void *map_rela
 	return 0;
 }
 
-static __always_inline void ct_update4_backend_id(const void *map,
+static __always_inline void ct_update4_backend_id(void *map,
 						  const struct ipv4_ct_tuple *tuple,
 						  const struct ct_state *state)
 {
 	struct ct_entry *entry;
 
-	entry = map_lookup_elem(map, tuple);
+	entry = bpf_map_lookup_elem(map, tuple);
 	if (!entry)
 		return;
 
@@ -887,12 +887,12 @@ static __always_inline void ct_update4_backend_id(const void *map,
 }
 
 static __always_inline void
-ct_update4_rev_nat_index(const void *map, const struct ipv4_ct_tuple *tuple,
+ct_update4_rev_nat_index(void *map, const struct ipv4_ct_tuple *tuple,
 			 const struct ct_state *state)
 {
 	struct ct_entry *entry;
 
-	entry = map_lookup_elem(map, tuple);
+	entry = bpf_map_lookup_elem(map, tuple);
 	if (!entry)
 		return;
 
@@ -900,20 +900,20 @@ ct_update4_rev_nat_index(const void *map, const struct ipv4_ct_tuple *tuple,
 }
 
 static __always_inline void
-ct_update4_dsr(const void *map, const struct ipv4_ct_tuple *tuple,
+ct_update4_dsr(void *map, const struct ipv4_ct_tuple *tuple,
 	       const bool dsr)
 {
 	struct ct_entry *entry;
 
-	entry = map_lookup_elem(map, tuple);
+	entry = bpf_map_lookup_elem(map, tuple);
 	if (!entry)
 		return;
 
 	entry->dsr = dsr;
 }
 
-static __always_inline int ct_create4(const void *map_main,
-				      const void *map_related,
+static __always_inline int ct_create4(void *map_main,
+				      void *map_related,
 				      struct ipv4_ct_tuple *tuple,
 				      struct __ctx_buff *ctx, const int dir,
 				      const struct ct_state *ct_state,
@@ -954,7 +954,7 @@ static __always_inline int ct_create4(const void *map_main,
 		    ct_state->src_sec_id, ct_state->addr);
 
 	entry.src_sec_id = ct_state->src_sec_id;
-	if (map_update_elem(map_main, tuple, &entry, 0) < 0) {
+	if (bpf_map_update_elem(map_main, tuple, &entry, 0) < 0) {
 		send_signal_ct_fill_up(ctx, SIGNAL_PROTO_V4);
 		return DROP_CT_CREATE_FAILED;
 	}
@@ -980,7 +980,7 @@ static __always_inline int ct_create4(const void *map_main,
 			tuple->daddr = ct_state->addr;
 		}
 
-		if (map_update_elem(map_main, tuple, &entry, 0) < 0) {
+		if (bpf_map_update_elem(map_main, tuple, &entry, 0) < 0) {
 			send_signal_ct_fill_up(ctx, SIGNAL_PROTO_V4);
 			return DROP_CT_CREATE_FAILED;
 		}
@@ -1006,7 +1006,7 @@ static __always_inline int ct_create4(const void *map_main,
 		 * the below throws an error, but we might as well just let
 		 * it time out.
 		 */
-		if (map_update_elem(map_related, &icmp_tuple, &entry, 0) < 0) {
+		if (bpf_map_update_elem(map_related, &icmp_tuple, &entry, 0) < 0) {
 			send_signal_ct_fill_up(ctx, SIGNAL_PROTO_V4);
 			return DROP_CT_CREATE_FAILED;
 		}
@@ -1024,14 +1024,14 @@ static __always_inline int ct_create4(const void *map_main,
  * backend => client belongs to the LB flow we can query the CT_EGRESS entry.
  */
 static __always_inline bool
-ct_has_nodeport_egress_entry4(const void *map,
+ct_has_nodeport_egress_entry4(void *map,
 			      struct ipv4_ct_tuple *ingress_tuple)
 {
 	__u8 prev_flags = ingress_tuple->flags;
 	struct ct_entry *entry;
 
 	ingress_tuple->flags = TUPLE_F_OUT;
-	entry = map_lookup_elem(map, ingress_tuple);
+	entry = bpf_map_lookup_elem(map, ingress_tuple);
 	ingress_tuple->flags = prev_flags;
 
 	if (entry)
@@ -1041,14 +1041,14 @@ ct_has_nodeport_egress_entry4(const void *map,
 }
 
 static __always_inline bool
-ct_has_nodeport_egress_entry6(const void *map,
+ct_has_nodeport_egress_entry6(void *map,
 			      struct ipv6_ct_tuple *ingress_tuple)
 {
 	__u8 prev_flags = ingress_tuple->flags;
 	struct ct_entry *entry;
 
 	ingress_tuple->flags = TUPLE_F_OUT;
-	entry = map_lookup_elem(map, ingress_tuple);
+	entry = bpf_map_lookup_elem(map, ingress_tuple);
 	ingress_tuple->flags = prev_flags;
 
 	if (entry)
@@ -1058,11 +1058,11 @@ ct_has_nodeport_egress_entry6(const void *map,
 }
 
 static __always_inline void
-ct_update_nodeport(const void *map, const void *tuple, const bool node_port)
+ct_update_nodeport(void *map, const void *tuple, const bool node_port)
 {
 	struct ct_entry *entry;
 
-	entry = map_lookup_elem(map, tuple);
+	entry = bpf_map_lookup_elem(map, tuple);
 	if (!entry)
 		return;
 

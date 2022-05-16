@@ -160,7 +160,7 @@ ctx_set_xfer(struct __sk_buff *ctx __maybe_unused, __u32 meta __maybe_unused)
 static __always_inline __maybe_unused int
 ctx_change_head(struct __sk_buff *ctx, __u32 head_room, __u64 flags)
 {
-	return skb_change_head(ctx, head_room, flags);
+	return bpf_skb_change_head(ctx, head_room, flags);
 }
 
 #endif /* __LIB_OVERLOADABLE_SKB_H_ */

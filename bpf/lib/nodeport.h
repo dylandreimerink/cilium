@@ -78,6 +78,15 @@ struct dsr_opt_v6 {
 };
 #endif /* ENABLE_IPV6 */
 
+/* Padded struct so the dmac at the end can be passed to another helper
+ * e.g. as a map value buffer. Otherwise verifier will trip over it with
+ * 'invalid indirect read from stack off'.
+ */
+struct bpf_fib_lookup_padded {
+	struct bpf_fib_lookup l;
+	__u8 pad[2];
+};
+
 static __always_inline bool nodeport_uses_dsr(__u8 nexthdr __maybe_unused)
 {
 # if defined(ENABLE_DSR) && !defined(ENABLE_DSR_HYBRID)
@@ -541,7 +550,7 @@ int tail_nodeport_ipv6_dsr(struct __ctx_buff *ctx)
 	ipv6_addr_copy((union v6addr *)&fib_params.l.ipv6_dst,
 		       (union v6addr *)&ip6->daddr);
 
-	ret = fib_lookup(ctx, &fib_params.l, sizeof(fib_params), 0);
+	ret = bpf_fib_lookup(ctx, &fib_params.l, sizeof(fib_params), 0);
 	if (ret != 0) {
 		ret = DROP_NO_FIB;
 		goto drop_err;
@@ -681,7 +690,7 @@ int tail_nodeport_nat_ipv6(struct __ctx_buff *ctx)
 			       (union v6addr *)&ip6->daddr);
 	}
 
-	ret = fib_lookup(ctx, &fib_params.l, sizeof(fib_params), 0);
+	ret = bpf_fib_lookup(ctx, &fib_params.l, sizeof(fib_params), 0);
 	if (ret != 0) {
 		ret = DROP_NO_FIB;
 		goto drop_err;
@@ -827,9 +836,9 @@ redo:
 		if (eth_load_saddr(ctx, smac.addr, 0) < 0)
 			return DROP_INVALID;
 
-		mac = map_lookup_elem(&NODEPORT_NEIGH6, &ip6->saddr);
+		mac = bpf_map_lookup_elem(&NODEPORT_NEIGH6, &ip6->saddr);
 		if (!mac || eth_addrcmp(mac, &smac)) {
-			ret = map_update_elem(&NODEPORT_NEIGH6, &ip6->saddr,
+			ret = bpf_map_update_elem(&NODEPORT_NEIGH6, &ip6->saddr,
 					      &smac, 0);
 			if (ret < 0)
 				return ret;
@@ -951,7 +960,7 @@ static __always_inline int rev_nodeport_lb6(struct __ctx_buff *ctx, int *ifindex
 		ipv6_addr_copy((union v6addr *)&fib_params.ipv6_src, &tuple.saddr);
 		ipv6_addr_copy((union v6addr *)&fib_params.ipv6_dst, &tuple.daddr);
 
-		fib_ret = fib_lookup(ctx, &fib_params, sizeof(fib_params), 0);
+		fib_ret = bpf_fib_lookup(ctx, &fib_params, sizeof(fib_params), 0);
 
 		if (fib_ret == 0)
 			*ifindex = fib_params.ifindex;
@@ -971,7 +980,7 @@ static __always_inline int rev_nodeport_lb6(struct __ctx_buff *ctx, int *ifindex
 				return DROP_NO_FIB;
 
 			/* See comment in rev_nodeport_lb4(). */
-			dmac = map_lookup_elem(&NODEPORT_NEIGH6, &tuple.daddr);
+			dmac = bpf_map_lookup_elem(&NODEPORT_NEIGH6, &tuple.daddr);
 			if (unlikely(!dmac))
 				return DROP_NO_FIB;
 			if (eth_store_daddr_aligned(ctx, dmac->addr, 0) < 0)
@@ -1581,7 +1590,7 @@ int tail_nodeport_ipv4_dsr(struct __ctx_buff *ctx)
 	fib_params.l.ipv4_src = ip4->saddr;
 	fib_params.l.ipv4_dst = ip4->daddr;
 
-	ret = fib_lookup(ctx, &fib_params.l, sizeof(fib_params), 0);
+	ret = bpf_fib_lookup(ctx, &fib_params.l, sizeof(fib_params), 0);
 	if (ret != 0) {
 		ret = DROP_NO_FIB;
 		goto drop_err;
@@ -1717,7 +1726,7 @@ int tail_nodeport_nat_ipv4(struct __ctx_buff *ctx)
 	fib_params.l.ipv4_src = ip4->saddr;
 	fib_params.l.ipv4_dst = ip4->daddr;
 
-	ret = fib_lookup(ctx, &fib_params.l, sizeof(fib_params), 0);
+	ret = bpf_fib_lookup(ctx, &fib_params.l, sizeof(fib_params), 0);
 	if (ret != 0) {
 		ret = DROP_NO_FIB;
 		goto drop_err;
@@ -1889,9 +1898,9 @@ redo:
 		if (eth_load_saddr(ctx, smac.addr, 0) < 0)
 			return DROP_INVALID;
 
-		mac = map_lookup_elem(&NODEPORT_NEIGH4, &ip4->saddr);
+		mac = bpf_map_lookup_elem(&NODEPORT_NEIGH4, &ip4->saddr);
 		if (!mac || eth_addrcmp(mac, &smac)) {
-			ret = map_update_elem(&NODEPORT_NEIGH4, &ip4->saddr,
+			ret = bpf_map_update_elem(&NODEPORT_NEIGH4, &ip4->saddr,
 					      &smac, 0);
 			if (ret < 0)
 				return ret;
@@ -2021,7 +2030,7 @@ static __always_inline int rev_nodeport_lb4(struct __ctx_buff *ctx, int *ifindex
 		fib_params.ipv4_src = ip4->saddr;
 		fib_params.ipv4_dst = ip4->daddr;
 
-		fib_ret = fib_lookup(ctx, &fib_params, sizeof(fib_params), 0);
+		fib_ret = bpf_fib_lookup(ctx, &fib_params, sizeof(fib_params), 0);
 
 		if (fib_ret == 0)
 			/* If the FIB lookup was successful, use the outgoing
@@ -2057,7 +2066,7 @@ static __always_inline int rev_nodeport_lb4(struct __ctx_buff *ctx, int *ifindex
 			 * table instead where we recorded the client
 			 * address in nodeport_lb4().
 			 */
-			dmac = map_lookup_elem(&NODEPORT_NEIGH4, &tuple.daddr);
+			dmac = bpf_map_lookup_elem(&NODEPORT_NEIGH4, &tuple.daddr);
 			if (unlikely(!dmac))
 				return DROP_NO_FIB;
 			if (eth_store_daddr_aligned(ctx, dmac->addr, 0) < 0)

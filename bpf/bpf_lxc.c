@@ -901,7 +901,7 @@ skip_egress_gateway:
 		struct vtep_value *vtep;
 
 		vkey.vtep_ip = ip4->daddr & VTEP_MASK;
-		vtep = map_lookup_elem(&VTEP_MAP, &vkey);
+		vtep = bpf_map_lookup_elem(&VTEP_MAP, &vkey);
 		if (!vtep)
 			goto skip_vtep;
 

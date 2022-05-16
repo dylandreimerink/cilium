@@ -62,7 +62,7 @@ int bpf_redir_proxy(struct sk_msg_md *msg)
 
 	verdict = policy_sk_egress(dst_id, key.sip4, (__u16)key.dport);
 	if (verdict >= 0)
-		msg_redirect_hash(msg, &SOCK_OPS_MAP, &key, flags);
+		bpf_msg_redirect_hash(msg, &SOCK_OPS_MAP, &key, flags);
 	return SK_PASS;
 }
 

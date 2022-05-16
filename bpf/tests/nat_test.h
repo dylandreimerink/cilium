@@ -147,12 +147,12 @@ void test_snat_v4_new_mapping() {
     fake_init_map((hashmap_void_t *)&ipv4_ct_tuple_map, bpf_hash_ipv4_ct_tuple,
 		  bpf_compare_ipv4_ct_tuple);
 
-    get_prandom_u32_ExpectAndReturn(0);
+    bpf_get_prandom_u32_ExpectAndReturn(0);
     // Stub the map helpers with the callbacks defined above.
     map_lookup_elem_Stub(ipv4_ct_tuple_map_lookup_elem_callback);
-    map_update_elem_Stub(ipv4_ct_tuple_map_update_elem_callback);
-    map_update_elem_Stub(ipv4_ct_tuple_map_update_elem_callback);
-    ktime_get_ns_ExpectAndReturn(0);
+    bpf_map_update_elem_Stub(ipv4_ct_tuple_map_update_elem_callback);
+    bpf_map_update_elem_Stub(ipv4_ct_tuple_map_update_elem_callback);
+    bpf_ktime_get_ns_ExpectAndReturn(0);
     skb_event_output_IgnoreAndReturn(0);
     // snat_v4_new_mapping will return 0 because rtuple will not be found by
     // snat_v4_lookup and then snat_v4_update will update successfully.
