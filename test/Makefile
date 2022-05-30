@@ -65,3 +65,14 @@ clean:
 	@$(ECHO_CLEAN)
 	-$(QUIET) rm -rf $(TEST_ARTIFACTS)
 	-$(QUIET) rm -f .vagrant/*.box
+
+compile_bpf_tests:
+	$(QUIET) make -C ../bpf/tests/bpf_tests clean
+	$(QUIET) make -C ../bpf/tests/bpf_tests all
+	go test bpf_tests/*.go -c -o /tmp/bpf-tests
+
+run_bpf_tests: compile_bpf_tests
+	sudo /tmp/bpf-tests -bpf-test-path ../bpf/tests/bpf_tests
+
+run_bpf_tests_verbose: compile_bpf_tests
+	sudo /tmp/bpf-tests -bpf-test-path ../bpf/tests/bpf_tests -test.v
