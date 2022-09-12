@@ -1194,6 +1194,8 @@ ipam:
     # refill the bucket up to the burst size capacity.
     # @default -- `4.0`
     externalAPILimitQPS: ~
+    # LB IPAM is a distinct component, when enabled it assigns IP addresses to services of type LoadBalancer
+    lbIPAM: false
 
 # -- Configure the eBPF-based ip-masq-agent
 ipMasqAgent:

@@ -34,7 +34,7 @@ const (
 )
 
 const (
-	// BGPAnnounceLBIP announces service IPs of type LoadBalancer via BGP
+	// BGPAnnounceLBIP announces service IPs of type LoadBalancer via BGP beta (deprecated)
 	BGPAnnounceLBIP = "bgp-announce-lb-ip"
 
 	// BGPConfigPath is the file path to the BGP configuration. It is
@@ -105,6 +105,9 @@ const (
 	UnmanagedPodWatcherInterval = "unmanaged-pod-watcher-interval"
 
 	// IPAM options
+
+	// LBIPAM is an internal IPAM module used to allocate IP addresses to load balancer services
+	LBIPAM = "lb-ipam"
 
 	// IPAMAPIBurst is the burst value allowed when accessing external IPAM APIs
 	IPAMAPIBurst = "limit-ipam-api-burst"
@@ -342,7 +345,7 @@ type OperatorConfig struct {
 	// retries of the actions in operator HA deployment.
 	LeaderElectionRetryPeriod time.Duration
 
-	// BGPAnnounceLBIP announces service IPs of type LoadBalancer via BGP.
+	// BGPAnnounceLBIP announces service IPs of type LoadBalancer via BGP beta (deprecated)
 	BGPAnnounceLBIP bool
 
 	// BGPConfigPath is the file path to the BGP configuration. It is
@@ -354,6 +357,9 @@ type OperatorConfig struct {
 	SkipCRDCreation bool
 
 	// IPAM options
+
+	// LBIPAM is an internal IPAM module used to allocate IP addresses to load balancer services
+	LBIPAM bool
 
 	// IPAMAPIBurst is the burst value allowed when accessing external IPAM APIs
 	IPAMAPIBurst int
@@ -537,6 +543,7 @@ func (c *OperatorConfig) Populate(vp *viper.Viper) {
 	c.LeaderElectionRetryPeriod = vp.GetDuration(LeaderElectionRetryPeriod)
 	c.BGPAnnounceLBIP = vp.GetBool(BGPAnnounceLBIP)
 	c.BGPConfigPath = vp.GetString(BGPConfigPath)
+	c.LBIPAM = vp.IsSet(LBIPAM)
 	c.SkipCRDCreation = vp.GetBool(SkipCRDCreation)
 	c.EnableIngressController = vp.GetBool(EnableIngressController)
 	c.EnforceIngressHTTPS = vp.GetBool(EnforceIngressHttps)
@@ -559,7 +566,7 @@ func (c *OperatorConfig) Populate(vp *viper.Viper) {
 		}
 	}
 
-	if c.BGPAnnounceLBIP {
+	if c.BGPAnnounceLBIP  {
 		c.SyncK8sServices = true
 		log.Infof("Auto-set %q to `true` because BGP support requires synchronizing services.",
 			SyncK8sServices)
