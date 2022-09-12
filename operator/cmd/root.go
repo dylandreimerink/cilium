@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 
@@ -27,6 +28,7 @@ import (
 	operatorOption "github.com/cilium/cilium/operator/option"
 	ces "github.com/cilium/cilium/operator/pkg/ciliumendpointslice"
 	"github.com/cilium/cilium/operator/pkg/ingress"
+	"github.com/cilium/cilium/operator/pkg/lbipam"
 	operatorWatchers "github.com/cilium/cilium/operator/watchers"
 
 	"github.com/cilium/cilium/pkg/components"
@@ -37,6 +39,7 @@ import (
 	"github.com/cilium/cilium/pkg/k8s"
 	"github.com/cilium/cilium/pkg/k8s/apis/cilium.io/client"
 	k8sClient "github.com/cilium/cilium/pkg/k8s/client"
+	"github.com/cilium/cilium/pkg/k8s/client/informers/externalversions"
 	k8sversion "github.com/cilium/cilium/pkg/k8s/version"
 	"github.com/cilium/cilium/pkg/kvstore"
 	"github.com/cilium/cilium/pkg/logging"
@@ -255,7 +258,8 @@ func runOperator(clientset k8sClient.Clientset, shutdowner fx.Shutdowner) {
 	// We only support Operator in HA mode for Kubernetes Versions having support for
 	// LeasesResourceLock.
 	// See docs on capabilities.LeasesResourceLock for more context.
-	if !capabilities.LeasesResourceLock {
+	// TODO REMOVE || true sabotage after done testing
+	if !capabilities.LeasesResourceLock || true {
 		log.Info("Support for coordination.k8s.io/v1 not present, fallback to non HA mode")
 		onOperatorStart(leaderElectionCtx, clientset)
 		return
@@ -401,7 +405,26 @@ func OnOperatorStartLeading(ctx context.Context, clientset k8sClient.Clientset) 
 
 	if operatorOption.Config.BGPAnnounceLBIP {
 		log.Info("Starting LB IP allocator")
-		operatorWatchers.StartLBIPAllocator(ctx, option.Config, clientset)
+		operatorWatchers.StartBGPBetaLBIPAllocator(ctx, option.Config, clientset)
+	}
+
+	if operatorOption.Config.LBIPAM {
+		log.Info("Starting LB IPAM")
+
+		// TODO move these to a more centralized location to allow for re-use?
+		extShardInformerFactory := externalversions.NewSharedInformerFactory(k8s.CiliumClient(), 0)
+		sharedInformerFactory := informers.NewSharedInformerFactory(k8s.Client(), 0)
+
+		lbipam := lbipam.NewLBIPAM(lbipam.LBIPAMParams{
+			Logger:       log,
+			PoolClient:   clientset.CiliumV2alpha1().CiliumLoadBalancerIPPools(),
+			SvcClient:    clientset.CoreV1(),
+			PoolInformer: extShardInformerFactory.Cilium().V2alpha1().CiliumLoadBalancerIPPools(),
+			SvcInformer:  sharedInformerFactory.Core().V1().Services(),
+			IPv4Enabled:  option.Config.IPv4Enabled(),
+			IPv6Enabled:  option.Config.IPv6Enabled(),
+		})
+		go lbipam.Run(ctx, nil)
 	}
 
 	if kvstoreEnabled() {

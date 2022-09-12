@@ -777,6 +777,12 @@ data:
 {{- end }}
 {{- end }}
 
+{{- if .Values.ipam.operator.lbIPAM }}
+  lb-ipam: "true"
+{{- else }}
+  lb-ipam: "false"
+{{- end}}
+
 {{- if .Values.enableCnpStatusUpdates }}
   disable-cnp-status-updates: {{ (not .Values.enableCnpStatusUpdates) | quote }}
 {{- else if (eq $defaultEnableCnpStatusUpdates "false") }}

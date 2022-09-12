@@ -1,0 +1,75 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: service-blue
+  labels:
+    color: blue
+  annotations:
+    "io.cilium/lb-ipam-ips": "20.0.10.5,20.0.10.6,20.0.10.7"
+spec:
+  type: LoadBalancer
+  # loadBalancerIP: 20.0.10.124
+  ports:
+  - port: 1234
+    name: test-port
+    targetPort: 1234
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: service-green
+  labels:
+    color: green
+spec:
+  type: LoadBalancer
+  loadBalancerIP: 30.0.10.123
+  ports:
+  - port: 1234
+    name: test-port
+    targetPort: 1234
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: service-green-2
+  labels:
+    color: green
+spec:
+  type: LoadBalancer
+  loadBalancerIP: 30.0.10.123
+  ports:
+  - port: 1234
+    name: test-port
+    targetPort: 1234
+    protocol: TCP
+# ---
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: service-blue2
+#   labels:
+#     color: blue
+# spec:
+#   type: LoadBalancer
+#   ports:
+#   - port: 1234
+#     name: test-port
+#     targetPort: 1234
+#     protocol: TCP
+# ---
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: service-green2
+#   namespace: kube-system
+#   labels:
+#     color: blue
+# spec:
+#   type: LoadBalancer
+#   ports:
+#   - port: 1234
+#     name: test-port
+#     targetPort: 1234
+#     protocol: TCP

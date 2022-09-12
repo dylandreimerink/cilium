@@ -1156,6 +1156,8 @@ ipam:
     clusterPoolIPv6PodCIDRList: []
     # -- IPv6 CIDR mask size to delegate to individual nodes for IPAM.
     clusterPoolIPv6MaskSize: 120
+    # LB IPAM is a distinct component, when enabled it assigns IP addresses to services of type LoadBalancer
+    lbIPAM: false
 
 # -- Configure the eBPF-based ip-masq-agent
 ipMasqAgent:

@@ -44,6 +44,9 @@ func init() {
 		"EC2 Instance tags in the form of k1=v1,k2=v2 (multiple k/v pairs can also be passed by repeating the CLI flag")
 	option.BindEnv(Vp, operatorOption.IPAMInstanceTags)
 
+	flags.Bool(operatorOption.LBIPAM, false, "Enables LB IPAM, which manages IPs for LoadBalancer services internally without cloud providers")
+	option.BindEnv(Vp, operatorOption.LBIPAM)
+
 	flags.Int64(operatorOption.ParallelAllocWorkers, defaults.ParallelAllocWorkers, "Maximum number of parallel IPAM workers")
 	option.BindEnv(Vp, operatorOption.ParallelAllocWorkers)
 
