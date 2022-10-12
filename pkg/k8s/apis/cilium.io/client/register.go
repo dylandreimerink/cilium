@@ -73,6 +73,9 @@ const (
 	// BGPPCRDName is the full name of the BGPP CRD.
 	BGPPCRDName = k8sconstv2alpha1.BGPPKindDefinition + "/" + k8sconstv2alpha1.CustomResourceDefinitionVersion
 
+	// BGPVrouterCRDName is the full name of the BGPVRouter CRD.
+	BGPVRouterCRDName = k8sconstv2alpha1.BGPVRouterKindDefinition + "/" + k8sconstv2alpha1.CustomResourceDefinitionVersion
+
 	// BGPPoolCRDName is the full name of the BGPPool CRD.
 	BGPPoolCRDName = k8sconstv2alpha1.BGPPoolKindDefinition + "/" + k8sconstv2alpha1.CustomResourceDefinitionVersion
 )
@@ -92,20 +95,21 @@ func CreateCustomResourceDefinitions(clientset apiextensionsclient.Interface) er
 	g, _ := errgroup.WithContext(context.Background())
 
 	resourceToCreateFnMapping := map[string]crdCreationFn{
-		synced.CRDResourceName(k8sconstv2.CNPName):           createCNPCRD,
-		synced.CRDResourceName(k8sconstv2.CCNPName):          createCCNPCRD,
-		synced.CRDResourceName(k8sconstv2.CNName):            createNodeCRD,
-		synced.CRDResourceName(k8sconstv2.CIDName):           createIdentityCRD,
-		synced.CRDResourceName(k8sconstv2.CEPName):           createCEPCRD,
-		synced.CRDResourceName(k8sconstv2.CEWName):           createCEWCRD,
-		synced.CRDResourceName(k8sconstv2.CLRPName):          createCLRPCRD,
-		synced.CRDResourceName(k8sconstv2.CEGPName):          createCEGPCRD,
-		synced.CRDResourceName(k8sconstv2alpha1.CENPName):    createCENPCRD,
-		synced.CRDResourceName(k8sconstv2alpha1.CESName):     createCESCRD,
-		synced.CRDResourceName(k8sconstv2.CCECName):          createCCECCRD,
-		synced.CRDResourceName(k8sconstv2.CECName):           createCECCRD,
-		synced.CRDResourceName(k8sconstv2alpha1.BGPPName):    createBGPPCRD,
-		synced.CRDResourceName(k8sconstv2alpha1.BGPPoolName): createBGPPoolCRD,
+		synced.CRDResourceName(k8sconstv2.CNPName):              createCNPCRD,
+		synced.CRDResourceName(k8sconstv2.CCNPName):             createCCNPCRD,
+		synced.CRDResourceName(k8sconstv2.CNName):               createNodeCRD,
+		synced.CRDResourceName(k8sconstv2.CIDName):              createIdentityCRD,
+		synced.CRDResourceName(k8sconstv2.CEPName):              createCEPCRD,
+		synced.CRDResourceName(k8sconstv2.CEWName):              createCEWCRD,
+		synced.CRDResourceName(k8sconstv2.CLRPName):             createCLRPCRD,
+		synced.CRDResourceName(k8sconstv2.CEGPName):             createCEGPCRD,
+		synced.CRDResourceName(k8sconstv2alpha1.CENPName):       createCENPCRD,
+		synced.CRDResourceName(k8sconstv2alpha1.CESName):        createCESCRD,
+		synced.CRDResourceName(k8sconstv2.CCECName):             createCCECCRD,
+		synced.CRDResourceName(k8sconstv2.CECName):              createCECCRD,
+		synced.CRDResourceName(k8sconstv2alpha1.BGPPName):       createBGPPCRD,
+		synced.CRDResourceName(k8sconstv2alpha1.BGPVRouterName): createBGPVRouter,
+		synced.CRDResourceName(k8sconstv2alpha1.BGPPoolName):    createBGPPoolCRD,
 	}
 	for _, r := range synced.AllCRDResourceNames() {
 		fn, ok := resourceToCreateFnMapping[r]
@@ -160,6 +164,9 @@ var (
 	//go:embed crds/v2alpha1/ciliumbgppeeringpolicies.yaml
 	crdsv2Alpha1Ciliumbgppeeringpolicies []byte
 
+	//go:embed crds/v2alpha1/ciliumbgpvirtualrouters.yaml
+	crdsv2Alpha1Ciliumbgpvirtualrouters []byte
+
 	//go:embed crds/v2alpha1/ciliumbgploadbalancerippools.yaml
 	crdsv2Alpha1Ciliumbgploadbalancerippools []byte
 )
@@ -203,6 +210,8 @@ func GetPregeneratedCRD(crdName string) apiextensionsv1.CustomResourceDefinition
 		crdBytes = crdsv2Ciliumenvoyconfigs
 	case BGPPCRDName:
 		crdBytes = crdsv2Alpha1Ciliumbgppeeringpolicies
+	case BGPVRouterCRDName:
+		crdBytes = crdsv2Alpha1Ciliumbgpvirtualrouters
 	case BGPPoolCRDName:
 		crdBytes = crdsv2Alpha1Ciliumbgploadbalancerippools
 	default:
@@ -373,6 +382,19 @@ func createBGPPCRD(clientset apiextensionsclient.Interface) error {
 		clientset,
 		BGPPCRDName,
 		constructV1CRD(k8sconstv2alpha1.BGPPName, ciliumCRD),
+		newDefaultPoller(),
+	)
+}
+
+// createBGPPCRD creates and updates the CiliumBGPPeeringPolicy CRD. It should be
+// called on agent startup but is idempotent and safe to call again.
+func createBGPVRouter(clientset apiextensionsclient.Interface) error {
+	ciliumCRD := GetPregeneratedCRD(BGPVRouterCRDName)
+
+	return createUpdateCRD(
+		clientset,
+		BGPVRouterCRDName,
+		constructV1CRD(k8sconstv2alpha1.BGPVRouterName, ciliumCRD),
 		newDefaultPoller(),
 	)
 }

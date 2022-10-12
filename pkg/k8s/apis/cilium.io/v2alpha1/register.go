@@ -70,6 +70,20 @@ const (
 	// BGPPName is the full name of Cilium BGP Peering Policy
 	BGPPName = BGPPPluralName + "." + CustomResourceDefinitionGroup
 
+	// Cilium BGP Virtual Router (BGPVRouter)
+
+	// BGPPSingularName is the singular name of Cilium BGP Peering Policy
+	BGPVrouterSingularName = "ciliumbgpvirtualrouter"
+
+	// BGPPPluralName is the plural name of Cilium BGP Peering Policy
+	BGPVrouterPluralName = "ciliumbgpvirtualrouters"
+
+	// BGPPKindDefinition is the kind name of Cilium BGP Peering Policy
+	BGPVRouterKindDefinition = "CiliumBGPVirtualRouter"
+
+	// BGPPName is the full name of Cilium BGP Peering Policy
+	BGPVRouterName = BGPVrouterPluralName + "." + CustomResourceDefinitionGroup
+
 	// Cilium BGP Load Balancer IP Pool (BGPPool)
 
 	// BGPPoolSingularName is the singular name of Cilium BGP Load Balancer IP Pool
@@ -132,6 +146,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&CiliumEndpointSliceList{},
 		&CiliumBGPPeeringPolicy{},
 		&CiliumBGPPeeringPolicyList{},
+		&CiliumBGPVirtualRouter{},
+		&CiliumBGPVirtualRouterList{},
 		&CiliumBGPLoadBalancerIPPool{},
 		&CiliumBGPLoadBalancerIPPoolList{},
 	)

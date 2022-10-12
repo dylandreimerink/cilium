@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"github.com/cilium/cilium/pkg/bgpv2"
 	"github.com/cilium/cilium/pkg/defaults"
 	"github.com/cilium/cilium/pkg/gops"
 	"github.com/cilium/cilium/pkg/hive"
@@ -81,6 +82,9 @@ func init() {
 		cell.Invoke(registerDaemonHooks),
 
 		node.LocalNodeStoreCell,
+
+		cell.Provide(func() *option.DaemonConfig { return option.Config }),
+		bgpv2.Cell,
 	)
 	Vp = agentHive.Viper()
 	agentHive.RegisterFlags(RootCmd.PersistentFlags())

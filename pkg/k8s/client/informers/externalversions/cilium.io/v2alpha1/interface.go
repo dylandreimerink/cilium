@@ -15,6 +15,8 @@ type Interface interface {
 	CiliumBGPLoadBalancerIPPools() CiliumBGPLoadBalancerIPPoolInformer
 	// CiliumBGPPeeringPolicies returns a CiliumBGPPeeringPolicyInformer.
 	CiliumBGPPeeringPolicies() CiliumBGPPeeringPolicyInformer
+	// CiliumBGPVirtualRouters returns a CiliumBGPVirtualRouterInformer.
+	CiliumBGPVirtualRouters() CiliumBGPVirtualRouterInformer
 	// CiliumEgressNATPolicies returns a CiliumEgressNATPolicyInformer.
 	CiliumEgressNATPolicies() CiliumEgressNATPolicyInformer
 	// CiliumEndpointSlices returns a CiliumEndpointSliceInformer.
@@ -40,6 +42,11 @@ func (v *version) CiliumBGPLoadBalancerIPPools() CiliumBGPLoadBalancerIPPoolInfo
 // CiliumBGPPeeringPolicies returns a CiliumBGPPeeringPolicyInformer.
 func (v *version) CiliumBGPPeeringPolicies() CiliumBGPPeeringPolicyInformer {
 	return &ciliumBGPPeeringPolicyInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
+}
+
+// CiliumBGPVirtualRouters returns a CiliumBGPVirtualRouterInformer.
+func (v *version) CiliumBGPVirtualRouters() CiliumBGPVirtualRouterInformer {
+	return &ciliumBGPVirtualRouterInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }
 
 // CiliumEgressNATPolicies returns a CiliumEgressNATPolicyInformer.

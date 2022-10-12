@@ -9,6 +9,8 @@ type CiliumBGPLoadBalancerIPPoolExpansion interface{}
 
 type CiliumBGPPeeringPolicyExpansion interface{}
 
+type CiliumBGPVirtualRouterExpansion interface{}
+
 type CiliumEgressNATPolicyExpansion interface{}
 
 type CiliumEndpointSliceExpansion interface{}

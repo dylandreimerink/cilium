@@ -23,6 +23,10 @@ func (c *FakeCiliumV2alpha1) CiliumBGPPeeringPolicies() v2alpha1.CiliumBGPPeerin
 	return &FakeCiliumBGPPeeringPolicies{c}
 }
 
+func (c *FakeCiliumV2alpha1) CiliumBGPVirtualRouters() v2alpha1.CiliumBGPVirtualRouterInterface {
+	return &FakeCiliumBGPVirtualRouters{c}
+}
+
 func (c *FakeCiliumV2alpha1) CiliumEgressNATPolicies() v2alpha1.CiliumEgressNATPolicyInterface {
 	return &FakeCiliumEgressNATPolicies{c}
 }

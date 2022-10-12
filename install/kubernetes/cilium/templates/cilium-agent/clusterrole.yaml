@@ -68,6 +68,7 @@ rules:
   resources:
   - ciliumbgploadbalancerippools
   - ciliumbgppeeringpolicies
+  - ciliumbgpvirtualrouters
   - ciliumclusterwideenvoyconfigs
   - ciliumclusterwidenetworkpolicies
   - ciliumegressgatewaypolicies

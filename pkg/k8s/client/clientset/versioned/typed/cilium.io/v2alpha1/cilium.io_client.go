@@ -17,6 +17,7 @@ type CiliumV2alpha1Interface interface {
 	RESTClient() rest.Interface
 	CiliumBGPLoadBalancerIPPoolsGetter
 	CiliumBGPPeeringPoliciesGetter
+	CiliumBGPVirtualRoutersGetter
 	CiliumEgressNATPoliciesGetter
 	CiliumEndpointSlicesGetter
 }
@@ -32,6 +33,10 @@ func (c *CiliumV2alpha1Client) CiliumBGPLoadBalancerIPPools() CiliumBGPLoadBalan
 
 func (c *CiliumV2alpha1Client) CiliumBGPPeeringPolicies() CiliumBGPPeeringPolicyInterface {
 	return newCiliumBGPPeeringPolicies(c)
+}
+
+func (c *CiliumV2alpha1Client) CiliumBGPVirtualRouters() CiliumBGPVirtualRouterInterface {
+	return newCiliumBGPVirtualRouters(c)
 }
 
 func (c *CiliumV2alpha1Client) CiliumEgressNATPolicies() CiliumEgressNATPolicyInterface {

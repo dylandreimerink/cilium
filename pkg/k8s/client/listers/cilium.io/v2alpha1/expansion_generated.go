@@ -13,6 +13,10 @@ type CiliumBGPLoadBalancerIPPoolListerExpansion interface{}
 // CiliumBGPPeeringPolicyLister.
 type CiliumBGPPeeringPolicyListerExpansion interface{}
 
+// CiliumBGPVirtualRouterListerExpansion allows custom methods to be added to
+// CiliumBGPVirtualRouterLister.
+type CiliumBGPVirtualRouterListerExpansion interface{}
+
 // CiliumEgressNATPolicyListerExpansion allows custom methods to be added to
 // CiliumEgressNATPolicyLister.
 type CiliumEgressNATPolicyListerExpansion interface{}
