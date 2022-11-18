@@ -10,15 +10,11 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	k8sLabels "k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/tools/cache"
 
 	"github.com/cilium/cilium/pkg/hive"
 	"github.com/cilium/cilium/pkg/hive/cell"
 	v2alpha1api "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2alpha1"
-	"github.com/cilium/cilium/pkg/k8s/client"
-	"github.com/cilium/cilium/pkg/k8s/client/informers/externalversions"
-	"github.com/cilium/cilium/pkg/k8s/client/listers/cilium.io/v2alpha1"
+	"github.com/cilium/cilium/pkg/k8s/resource"
 	slimlabels "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/labels"
 	slimmetav1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
 	"github.com/cilium/cilium/pkg/logging"
@@ -93,17 +89,21 @@ type ControlPlaneState struct {
 	IPv6 net.IP
 }
 
+type policyLister interface {
+	List() []*v2alpha1api.CiliumBGPPeeringPolicy
+}
+
 // Controller is the agent side BGP Control Plane controller.
 //
 // Controller listens for events and drives BGP related sub-systems
 // to maintain a desired state.
 type Controller struct {
 	NodeSpec nodeSpecer
-	// PolicyLister provides cached and indexed lookups of
-	// for CilumBGPPeeringPolicy API objects.
-	PolicyLister v2alpha1.CiliumBGPPeeringPolicyLister
-	// policyInformer keeps the controller informed of any policy changes.
-	policyInformer cache.SharedIndexInformer
+	// PolicyResource provides a store of cached policies and allows us to observe changes to the objects in its
+	// store.
+	PolicyResource resource.Resource[*v2alpha1api.CiliumBGPPeeringPolicy]
+	// PolicyLister is an interface which allows for the listing of all known policies
+	PolicyLister policyLister
 	// Sig informs the Controller that a Kubernetes
 	// event of interest has occurred.
 	//
@@ -115,6 +115,9 @@ type Controller struct {
 	// BGPMgr is an implementation of the BGPRouterManager interface
 	// and provides a declarative API for configuring BGP peers.
 	BGPMgr BGPRouterManager
+
+	// Shutdowner can be used to trigger a shutdown of hive
+	Shutdowner hive.Shutdowner
 
 	// ctx is a Context to manage the lifetime of the controller
 	ctx context.Context
@@ -132,13 +135,14 @@ type ControllerOpt func(*Controller)
 type ControllerParams struct {
 	cell.In
 
-	LC           hive.Lifecycle
-	Clientset    client.Clientset
-	Sig          Signaler
-	RouteMgr     BGPRouterManager
-	DaemonConfig *option.DaemonConfig
-	NodeSpec     nodeSpecer
-	Opts         []ControllerOpt `group:"bgp-controller-options"`
+	LC             hive.Lifecycle
+	Shutdowner     hive.Shutdowner
+	Sig            Signaler
+	RouteMgr       BGPRouterManager
+	PolicyResource resource.Resource[*v2alpha1api.CiliumBGPPeeringPolicy]
+	DaemonConfig   *option.DaemonConfig
+	NodeSpec       nodeSpecer
+	Opts           []ControllerOpt `group:"bgp-controller-options"`
 }
 
 // NewController constructs a new BGP Control Plane Controller.
@@ -158,27 +162,15 @@ func NewController(params ControllerParams) (*Controller, error) {
 
 	log.Info("Initializing BGP Control Plane")
 
-	var (
-		// we'll use to list and watch BGPPeeringPolicies
-		factory = externalversions.NewSharedInformerFactory(params.Clientset, 0)
-	)
-
 	c := Controller{
-		Sig:      params.Sig,
-		BGPMgr:   params.RouteMgr,
-		NodeSpec: params.NodeSpec,
+		Sig:            params.Sig,
+		BGPMgr:         params.RouteMgr,
+		PolicyResource: params.PolicyResource,
+		NodeSpec:       params.NodeSpec,
+		Shutdowner:     params.Shutdowner,
 	}
 
 	c.ctx, c.cancel = context.WithCancel(context.Background())
-
-	// setup policy lister and informer.
-	c.PolicyLister = factory.Cilium().V2alpha1().CiliumBGPPeeringPolicies().Lister()
-	c.policyInformer = factory.Cilium().V2alpha1().CiliumBGPPeeringPolicies().Informer()
-	c.policyInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    c.Sig.Event,
-		UpdateFunc: func(_ interface{}, _ interface{}) { c.Sig.Event(struct{}{}) },
-		DeleteFunc: c.Sig.Event,
-	})
 
 	// apply any options.
 	for _, opt := range params.Opts {
@@ -191,8 +183,24 @@ func NewController(params ControllerParams) (*Controller, error) {
 }
 
 // Start is called by hive after all of our dependencies have been started.
-func (c *Controller) Start(_ hive.HookContext) error {
-	go c.policyInformer.Run(c.ctx.Done())
+func (c *Controller) Start(ctx hive.HookContext) error {
+	var err error
+	c.PolicyLister, err = c.PolicyResource.Store(ctx)
+	if err != nil {
+		return fmt.Errorf("PolicyResource.Store(): %w", err)
+	}
+
+	c.PolicyResource.Observe(c.ctx, func(e resource.Event[*v2alpha1api.CiliumBGPPeeringPolicy]) {
+		// Always mark the event as done since we have no way to retry on errors as of yet.
+		e.Done(nil)
+		// Signal the reconciliation logic.
+		c.Sig.Event(struct{}{})
+	}, func(err error) {
+		if err != nil {
+			c.Shutdowner.Shutdown(hive.ShutdownWithError(err))
+		}
+	})
+
 	go c.Run()
 	return nil
 }
@@ -320,10 +328,7 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	)
 
 	// retrieve all CiliumBGPPeeringPolicies
-	policies, err := c.PolicyLister.List(k8sLabels.NewSelector())
-	if err != nil {
-		return fmt.Errorf("failed to list CiliumBGPPeeringPolicies")
-	}
+	policies := c.PolicyLister.List()
 	l.WithField("count", len(policies)).Debug("Successfully listed CiliumBGPPeeringPolicies")
 
 	// perform policy selection based on node.
