@@ -36,6 +36,7 @@ import (
 	v2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/lock"
+	"github.com/cilium/cilium/pkg/metrics"
 	monitorAPI "github.com/cilium/cilium/pkg/monitor/api"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/policy"
@@ -153,7 +154,7 @@ func (d *DummySelectorCacheUser) IdentitySelectionUpdated(selector policy.Cached
 
 // Setup identities, ports and endpoint IDs we will need
 var (
-	cacheAllocator          = cache.NewCachingIdentityAllocator(&testidentity.IdentityAllocatorOwnerMock{})
+	cacheAllocator          = cache.NewCachingIdentityAllocator(&testidentity.IdentityAllocatorOwnerMock{}, metrics.NewLegacyMetrics())
 	fakeAllocator           = testidentity.NewMockIdentityAllocator(cacheAllocator.GetIdentityCache())
 	testSelectorCache       = policy.NewSelectorCache(fakeAllocator, cacheAllocator.GetIdentityCache())
 	dummySelectorCacheUser  = &DummySelectorCacheUser{}
@@ -189,7 +190,7 @@ func (s *DNSProxyTestSuite) SetUpTest(c *C) {
 	}, nil, wg)
 	wg.Wait()
 
-	s.repo = policy.NewPolicyRepository(nil, nil, nil)
+	s.repo = policy.NewPolicyRepository(nil, nil, nil, metrics.NewLegacyMetrics())
 	s.dnsTCPClient = &dns.Client{Net: "tcp", Timeout: time.Second, SingleInflight: true}
 	s.dnsServer = setupServer(c)
 	c.Assert(s.dnsServer, Not(IsNil), Commentf("unable to setup DNS server"))
@@ -201,7 +202,7 @@ func (s *DNSProxyTestSuite) SetUpTest(c *C) {
 			if s.restoring {
 				return nil, fmt.Errorf("No EPs available when restoring")
 			}
-			return endpoint.NewEndpointWithState(s, s, testipcache.NewMockIPCache(), &endpoint.FakeEndpointProxy{}, testidentity.NewMockIdentityAllocator(nil), uint16(epID1), endpoint.StateReady), nil
+			return endpoint.NewEndpointWithState(s, s, testipcache.NewMockIPCache(), &endpoint.FakeEndpointProxy{}, testidentity.NewMockIdentityAllocator(nil), metrics.NewLegacyMetrics(), uint16(epID1), endpoint.StateReady), nil
 		},
 		// LookupSecIDByIP
 		func(ip net.IP) (ipcache.Identity, bool) {
@@ -765,7 +766,7 @@ func (s *DNSProxyTestSuite) TestFullPathDependence(c *C) {
 	c.Assert(allowed, Equals, false, Commentf("request was allowed when it should be rejected"))
 
 	// Restore rules
-	ep1 := endpoint.NewEndpointWithState(s, s, testipcache.NewMockIPCache(), &endpoint.FakeEndpointProxy{}, testidentity.NewMockIdentityAllocator(nil), uint16(epID1), endpoint.StateReady)
+	ep1 := endpoint.NewEndpointWithState(s, s, testipcache.NewMockIPCache(), &endpoint.FakeEndpointProxy{}, testidentity.NewMockIdentityAllocator(nil), metrics.NewLegacyMetrics(), uint16(epID1), endpoint.StateReady)
 	ep1.DNSRules = restored1
 	s.proxy.RestoreRules(ep1)
 	_, exists = s.proxy.restored[epID1]
@@ -811,7 +812,7 @@ func (s *DNSProxyTestSuite) TestFullPathDependence(c *C) {
 	c.Assert(allowed, Equals, true, Commentf("request was rejected when it should be allowed"))
 
 	// Restore rules for epID3
-	ep3 := endpoint.NewEndpointWithState(s, s, testipcache.NewMockIPCache(), &endpoint.FakeEndpointProxy{}, testidentity.NewMockIdentityAllocator(nil), uint16(epID3), endpoint.StateReady)
+	ep3 := endpoint.NewEndpointWithState(s, s, testipcache.NewMockIPCache(), &endpoint.FakeEndpointProxy{}, testidentity.NewMockIdentityAllocator(nil), metrics.NewLegacyMetrics(), uint16(epID3), endpoint.StateReady)
 	ep3.DNSRules = restored3
 	s.proxy.RestoreRules(ep3)
 	_, exists = s.proxy.restored[epID3]
@@ -1012,7 +1013,7 @@ func (s *DNSProxyTestSuite) TestRestoredEndpoint(c *C) {
 
 	// restore rules, set the mock to restoring state
 	s.restoring = true
-	ep1 := endpoint.NewEndpointWithState(s, s, testipcache.NewMockIPCache(), &endpoint.FakeEndpointProxy{}, testidentity.NewMockIdentityAllocator(nil), uint16(epID1), endpoint.StateReady)
+	ep1 := endpoint.NewEndpointWithState(s, s, testipcache.NewMockIPCache(), &endpoint.FakeEndpointProxy{}, testidentity.NewMockIdentityAllocator(nil), metrics.NewLegacyMetrics(), uint16(epID1), endpoint.StateReady)
 	ep1.IPv4 = netip.MustParseAddr("127.0.0.1")
 	ep1.IPv6 = netip.MustParseAddr("::1")
 	ep1.DNSRules = restored

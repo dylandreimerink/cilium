@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/cilium/cilium/pkg/metrics"
+	"github.com/cilium/cilium/pkg/metrics/metric"
 	"github.com/cilium/cilium/pkg/rate"
 )
 
@@ -95,24 +96,123 @@ var apiRateLimitDefaults = map[string]rate.APILimiterParameters{
 	},
 }
 
-type apiRateLimitingMetrics struct{}
+type apiRateLimitingMetrics struct {
+	// APILimiterWaitDuration is the gauge of the current mean, min, and
+	// max wait duration
+	APILimiterWaitDuration metric.Vec[metric.Gauge]
+	// APILimiterProcessingDuration is the gauge of the mean and estimated
+	// processing duration
+	APILimiterProcessingDuration metric.Vec[metric.Gauge]
+	// APILimiterRequestsInFlight is the gauge of the current and max
+	// requests in flight
+	APILimiterRequestsInFlight metric.Vec[metric.Gauge]
+	// APILimiterRateLimit is the gauge of the current rate limiting
+	// configuration including limit and burst
+	APILimiterRateLimit metric.Vec[metric.Gauge]
+	// APILimiterWaitHistoryDuration is a histogram that measures the
+	// individual wait durations of API limiters
+	APILimiterWaitHistoryDuration metric.Vec[metric.Observer]
+	// APILimiterAdjustmentFactor is the gauge representing the latest
+	// adjustment factor that was applied
+	APILimiterAdjustmentFactor metric.Vec[metric.Gauge]
+	// APILimiterProcessedRequests is the counter of the number of
+	// processed (successful and failed) requests
+	APILimiterProcessedRequests metric.Vec[metric.Counter]
+}
+
+func newApiRateLimitingMetrics() *apiRateLimitingMetrics {
+	return &apiRateLimitingMetrics{
+		APILimiterWaitHistoryDuration: metric.NewHistogramVec(metric.HistogramOpts{
+			Namespace:        metrics.Namespace,
+			Subsystem:        metrics.SubsystemAPILimiter,
+			Name:             "wait_history_duration_seconds",
+			Help:             "Histogram over duration of waiting period for API calls subjects to rate limiting",
+			EnabledByDefault: false,
+		}, metric.LabelDescriptions{{Name: "api_call"}}),
+
+		APILimiterWaitDuration: metric.NewGaugeVec(metric.GaugeOpts{
+			Namespace:        metrics.Namespace,
+			Subsystem:        metrics.SubsystemAPILimiter,
+			Name:             "wait_duration_seconds",
+			Help:             "Current wait time for api calls",
+			EnabledByDefault: true,
+		}, metric.LabelDescriptions{
+			{Name: "api_call"},
+			{Name: "value"},
+		}),
+
+		APILimiterProcessingDuration: metric.NewGaugeVec(metric.GaugeOpts{
+			Namespace:        metrics.Namespace,
+			Subsystem:        metrics.SubsystemAPILimiter,
+			Name:             "processing_duration_seconds",
+			Help:             "Current processing time of api call",
+			EnabledByDefault: true,
+		}, metric.LabelDescriptions{
+			{Name: "api_call"},
+			{Name: "value"},
+		}),
+
+		APILimiterRequestsInFlight: metric.NewGaugeVec(metric.GaugeOpts{
+			Namespace:        metrics.Namespace,
+			Subsystem:        metrics.SubsystemAPILimiter,
+			Name:             "requests_in_flight",
+			Help:             "Current requests in flight",
+			EnabledByDefault: true,
+		}, metric.LabelDescriptions{
+			{Name: "api_call"},
+			{Name: "value"},
+		}),
+
+		APILimiterRateLimit: metric.NewGaugeVec(metric.GaugeOpts{
+			Namespace:        metrics.Namespace,
+			Subsystem:        metrics.SubsystemAPILimiter,
+			Name:             "rate_limit",
+			Help:             "Current rate limiting configuration",
+			EnabledByDefault: true,
+		}, metric.LabelDescriptions{
+			{Name: "api_call"},
+			{Name: "value"},
+		}),
+
+		APILimiterAdjustmentFactor: metric.NewGaugeVec(metric.GaugeOpts{
+			Namespace:        metrics.Namespace,
+			Subsystem:        metrics.SubsystemAPILimiter,
+			Name:             "adjustment_factor",
+			Help:             "Current adjustment factor while auto adjusting",
+			EnabledByDefault: true,
+		}, metric.LabelDescriptions{
+			{Name: "api_call"},
+		}),
+
+		APILimiterProcessedRequests: metric.NewCounterVec(metric.CounterOpts{
+			Namespace:        metrics.Namespace,
+			Subsystem:        metrics.SubsystemAPILimiter,
+			Name:             "processed_requests_total",
+			Help:             "Total number of API requests processed",
+			EnabledByDefault: true,
+		}, metric.LabelDescriptions{
+			{Name: "api_call"},
+			metrics.LabelOutcome,
+		}),
+	}
+}
 
 func (a *apiRateLimitingMetrics) ProcessedRequest(name string, v rate.MetricsValues) {
-	metrics.APILimiterProcessingDuration.WithLabelValues(name, "mean").Set(v.MeanProcessingDuration)
-	metrics.APILimiterProcessingDuration.WithLabelValues(name, "estimated").Set(v.EstimatedProcessingDuration)
-	metrics.APILimiterWaitDuration.WithLabelValues(name, "mean").Set(v.MeanWaitDuration)
-	metrics.APILimiterWaitDuration.WithLabelValues(name, "max").Set(v.MaxWaitDuration.Seconds())
-	metrics.APILimiterWaitDuration.WithLabelValues(name, "min").Set(v.MinWaitDuration.Seconds())
-	metrics.APILimiterRequestsInFlight.WithLabelValues(name, "in-flight").Set(float64(v.CurrentRequestsInFlight))
-	metrics.APILimiterRequestsInFlight.WithLabelValues(name, "limit").Set(float64(v.ParallelRequests))
-	metrics.APILimiterRateLimit.WithLabelValues(name, "limit").Set(float64(v.Limit))
-	metrics.APILimiterRateLimit.WithLabelValues(name, "burst").Set(float64(v.Burst))
-	metrics.APILimiterAdjustmentFactor.WithLabelValues(name).Set(v.AdjustmentFactor)
+	a.APILimiterProcessingDuration.WithLabelValues(name, "mean").Set(v.MeanProcessingDuration)
+	a.APILimiterProcessingDuration.WithLabelValues(name, "estimated").Set(v.EstimatedProcessingDuration)
+	a.APILimiterWaitDuration.WithLabelValues(name, "mean").Set(v.MeanWaitDuration)
+	a.APILimiterWaitDuration.WithLabelValues(name, "max").Set(v.MaxWaitDuration.Seconds())
+	a.APILimiterWaitDuration.WithLabelValues(name, "min").Set(v.MinWaitDuration.Seconds())
+	a.APILimiterRequestsInFlight.WithLabelValues(name, "in-flight").Set(float64(v.CurrentRequestsInFlight))
+	a.APILimiterRequestsInFlight.WithLabelValues(name, "limit").Set(float64(v.ParallelRequests))
+	a.APILimiterRateLimit.WithLabelValues(name, "limit").Set(float64(v.Limit))
+	a.APILimiterRateLimit.WithLabelValues(name, "burst").Set(float64(v.Burst))
+	a.APILimiterAdjustmentFactor.WithLabelValues(name).Set(v.AdjustmentFactor)
 
 	if v.Outcome == "" {
-		metrics.APILimiterWaitHistoryDuration.WithLabelValues(name).Observe(v.WaitDuration.Seconds())
+		a.APILimiterWaitHistoryDuration.WithLabelValues(name).Observe(v.WaitDuration.Seconds())
 		v.Outcome = metrics.Error2Outcome(v.Error)
 	}
 
-	metrics.APILimiterProcessedRequests.WithLabelValues(name, v.Outcome).Inc()
+	a.APILimiterProcessedRequests.WithLabelValues(name, v.Outcome).Inc()
 }

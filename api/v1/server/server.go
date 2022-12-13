@@ -27,6 +27,7 @@ import (
 
 	"github.com/cilium/cilium/api/v1/server/restapi"
 	"github.com/cilium/cilium/pkg/api"
+	ciliumMetric "github.com/cilium/cilium/pkg/metrics"
 )
 
 const (
@@ -44,19 +45,20 @@ func init() {
 }
 
 // NewServer creates a new api cilium API server but does not configure it
-func NewServer(api *restapi.CiliumAPIAPI) *Server {
+func NewServer(api *restapi.CiliumAPIAPI, legacyMetrics *ciliumMetric.LegacyMetrics) *Server {
 	s := new(Server)
 
 	s.shutdown = make(chan struct{})
 	s.api = api
 	s.interrupt = make(chan os.Signal, 1)
+	s.LegacyMetrics = legacyMetrics
 	return s
 }
 
 // ConfigureAPI configures the API and handlers.
 func (s *Server) ConfigureAPI() {
 	if s.api != nil {
-		s.handler = configureAPI(s.api)
+		s.handler = configureAPI(s.api, s.LegacyMetrics)
 	}
 }
 
@@ -96,6 +98,8 @@ type Server struct {
 	TLSWriteTimeout   time.Duration
 	httpsServerL      net.Listener
 
+	LegacyMetrics *ciliumMetric.LegacyMetrics
+
 	api          *restapi.CiliumAPIAPI
 	handler      http.Handler
 	hasListeners bool
@@ -134,7 +138,7 @@ func (s *Server) SetAPI(api *restapi.CiliumAPIAPI) {
 	}
 
 	s.api = api
-	s.handler = configureAPI(api)
+	s.handler = configureAPI(api, s.LegacyMetrics)
 }
 
 func (s *Server) hasScheme(scheme string) bool {

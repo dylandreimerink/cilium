@@ -25,6 +25,7 @@ import (
 	slim_discover_v1beta1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/discovery/v1beta1"
 	"github.com/cilium/cilium/pkg/k8s/watchers/subscriber"
 	"github.com/cilium/cilium/pkg/lock"
+	"github.com/cilium/cilium/pkg/metrics"
 	nodetypes "github.com/cilium/cilium/pkg/node/types"
 )
 
@@ -37,7 +38,7 @@ var _ subscriber.Node = (*MetalLBSpeaker)(nil)
 
 // New creates a new MetalLB BGP speaker controller. Options are provided to
 // specify what the Speaker should announce via BGP.
-func New(ctx context.Context, clientset client.Clientset, opts Opts) (*MetalLBSpeaker, error) {
+func New(ctx context.Context, clientset client.Clientset, legacyMetrics *metrics.LegacyMetrics, opts Opts) (*MetalLBSpeaker, error) {
 	ctrl, err := newMetalLBSpeaker(ctx, clientset)
 	if err != nil {
 		return nil, err
@@ -52,6 +53,8 @@ func New(ctx context.Context, clientset client.Clientset, opts Opts) (*MetalLBSp
 		queue: workqueue.New(),
 
 		services: make(map[k8s.ServiceID]*slim_corev1.Service),
+
+		legacyMetrics: legacyMetrics,
 	}
 
 	go spkr.run(ctx)
@@ -94,6 +97,8 @@ type MetalLBSpeaker struct {
 	// ensuring no other events are processed after the
 	// final withdraw of routes.
 	shutdown int32
+
+	legacyMetrics *metrics.LegacyMetrics
 }
 
 func (s *MetalLBSpeaker) shutDown() bool {

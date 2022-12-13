@@ -172,7 +172,7 @@ func (k *K8sWatcher) addCiliumNetworkPolicyV2(ciliumNPClient clientset.Interface
 		if policyImportErr == nil {
 			rev, policyImportErr = k.policyManager.PolicyAdd(rules, &policy.AddOptions{
 				ReplaceWithLabels: cnp.GetIdentityLabels(),
-				Source:            metrics.LabelEventSourceK8s,
+				Source:            metrics.LabelEventSourceK8s.Name,
 			})
 		}
 	}
@@ -196,6 +196,7 @@ func (k *K8sWatcher) addCiliumNetworkPolicyV2(ciliumNPClient clientset.Interface
 			NodeManager:                 k.nodeDiscoverManager,
 			UpdateDuration:              spanstat.Start(),
 			WaitForEndpointsAtPolicyRev: k.endpointManager.WaitForEndpointsAtPolicyRev,
+			LegacyMetrics:               k.legacyMetrics,
 		}
 
 		ctrlName := cnp.GetControllerName()
@@ -329,6 +330,7 @@ func (k *K8sWatcher) updateCiliumNetworkPolicyV2AnnotationsOnly(ciliumNPClient c
 		NodeManager:                 k.nodeDiscoverManager,
 		UpdateDuration:              spanstat.Start(),
 		WaitForEndpointsAtPolicyRev: k.endpointManager.WaitForEndpointsAtPolicyRev,
+		LegacyMetrics:               k.legacyMetrics,
 	}
 
 	k8sCM.UpdateController(ctrlName,

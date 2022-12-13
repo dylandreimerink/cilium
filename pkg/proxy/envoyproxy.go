@@ -11,6 +11,7 @@ import (
 	"github.com/cilium/cilium/pkg/completion"
 	"github.com/cilium/cilium/pkg/envoy"
 	"github.com/cilium/cilium/pkg/logging/logfields"
+	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/policy"
 	"github.com/cilium/cilium/pkg/revert"
@@ -27,10 +28,10 @@ type envoyRedirect struct {
 
 var envoyOnce sync.Once
 
-func startEnvoy(stateDir string, xdsServer *envoy.XDSServer, wg *completion.WaitGroup) {
+func startEnvoy(stateDir string, xdsServer *envoy.XDSServer, wg *completion.WaitGroup, legacyMetrics *metrics.LegacyMetrics) {
 	envoyOnce.Do(func() {
 		// Start Envoy on first invocation
-		envoyProxy = envoy.StartEnvoy(stateDir, option.Config.EnvoyLogPath, 0)
+		envoyProxy = envoy.StartEnvoy(legacyMetrics, stateDir, option.Config.EnvoyLogPath, 0)
 
 		// Add Prometheus listener if the port is (properly) configured
 		if option.Config.ProxyPrometheusPort < 0 || option.Config.ProxyPrometheusPort > 65535 {
@@ -43,8 +44,8 @@ func startEnvoy(stateDir string, xdsServer *envoy.XDSServer, wg *completion.Wait
 
 // createEnvoyRedirect creates a redirect with corresponding proxy
 // configuration. This will launch a proxy instance.
-func createEnvoyRedirect(r *Redirect, stateDir string, xdsServer *envoy.XDSServer, mayUseOriginalSourceAddr bool, wg *completion.WaitGroup) (RedirectImplementation, error) {
-	startEnvoy(stateDir, xdsServer, wg)
+func createEnvoyRedirect(r *Redirect, stateDir string, xdsServer *envoy.XDSServer, mayUseOriginalSourceAddr bool, wg *completion.WaitGroup, legacyMetrics *metrics.LegacyMetrics) (RedirectImplementation, error) {
+	startEnvoy(stateDir, xdsServer, wg, legacyMetrics)
 
 	l := r.listener
 	if envoyProxy != nil {

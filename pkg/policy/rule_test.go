@@ -14,6 +14,7 @@ import (
 	"github.com/cilium/cilium/pkg/checker"
 	"github.com/cilium/cilium/pkg/identity"
 	"github.com/cilium/cilium/pkg/labels"
+	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/policy/api"
 	"github.com/cilium/cilium/pkg/policy/api/kafka"
 	"github.com/cilium/cilium/pkg/u8proto"
@@ -1604,7 +1605,7 @@ func checkEgress(c *C, repo *Repository, ctx *SearchContext, verdict api.Decisio
 }
 
 func parseAndAddRules(c *C, rules api.Rules) *Repository {
-	repo := NewPolicyRepository(nil, nil, nil)
+	repo := NewPolicyRepository(nil, nil, nil, metrics.NewLegacyMetrics())
 	repo.selectorCache = testSelectorCache
 
 	_, _ = repo.AddList(rules)

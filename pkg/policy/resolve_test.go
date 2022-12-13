@@ -16,6 +16,7 @@ import (
 	"github.com/cilium/cilium/pkg/identity/cache"
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/lock"
+	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/policy/api"
 	"github.com/cilium/cilium/pkg/policy/trafficdirection"
@@ -190,10 +191,10 @@ func (d DummyOwner) PolicyDebug(fields logrus.Fields, msg string) {
 }
 
 func bootstrapRepo(ruleGenFunc func(int) api.Rules, numRules int, c *C) *Repository {
-	mgr := cache.NewCachingIdentityAllocator(&testidentity.IdentityAllocatorOwnerMock{})
+	mgr := cache.NewCachingIdentityAllocator(&testidentity.IdentityAllocatorOwnerMock{}, metrics.NewLegacyMetrics())
 	ids := mgr.GetIdentityCache()
 	fakeAllocator := testidentity.NewMockIdentityAllocator(ids)
-	testRepo := NewPolicyRepository(fakeAllocator, ids, nil)
+	testRepo := NewPolicyRepository(fakeAllocator, ids, nil, metrics.NewLegacyMetrics())
 
 	SetPolicyEnabled(option.DefaultEnforcement)
 	GenerateNumIdentities(3000)

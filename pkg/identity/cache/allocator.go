@@ -89,6 +89,8 @@ type CachingIdentityAllocator struct {
 	setupMutex lock.Mutex
 
 	owner IdentityAllocatorOwner
+
+	legacyMetrics *metrics.LegacyMetrics
 }
 
 // IdentityAllocatorOwner is the interface the owner of an identity allocator
@@ -256,7 +258,7 @@ func (m *CachingIdentityAllocator) InitIdentityAllocator(client clientset.Interf
 
 // NewCachingIdentityAllocator creates a new instance of an
 // CachingIdentityAllocator.
-func NewCachingIdentityAllocator(owner IdentityAllocatorOwner) *CachingIdentityAllocator {
+func NewCachingIdentityAllocator(owner IdentityAllocatorOwner, legacyMetrics *metrics.LegacyMetrics) *CachingIdentityAllocator {
 	watcher := identityWatcher{
 		owner: owner,
 	}
@@ -267,6 +269,7 @@ func NewCachingIdentityAllocator(owner IdentityAllocatorOwner) *CachingIdentityA
 		identitiesPath:                     IdentitiesPath,
 		watcher:                            watcher,
 		events:                             make(allocator.AllocatorEventChan, 1024),
+		legacyMetrics:                      legacyMetrics,
 	}
 	m.watcher.watch(m.events)
 
@@ -326,11 +329,11 @@ func (m *CachingIdentityAllocator) AllocateIdentity(ctx context.Context, lbls la
 		if err == nil {
 			if allocated || isNewLocally {
 				if id.ID.HasLocalScope() {
-					metrics.Identity.WithLabelValues(identity.NodeLocalIdentityType).Inc()
+					m.legacyMetrics.Identity.WithLabelValues(identity.NodeLocalIdentityType).Inc()
 				} else if id.ID.IsReservedIdentity() {
-					metrics.Identity.WithLabelValues(identity.ReservedIdentityType).Inc()
+					m.legacyMetrics.Identity.WithLabelValues(identity.ReservedIdentityType).Inc()
 				} else {
-					metrics.Identity.WithLabelValues(identity.ClusterLocalIdentityType).Inc()
+					m.legacyMetrics.Identity.WithLabelValues(identity.ClusterLocalIdentityType).Inc()
 				}
 			}
 
@@ -403,11 +406,11 @@ func (m *CachingIdentityAllocator) Release(ctx context.Context, id *identity.Ide
 	defer func() {
 		if released {
 			if id.ID.HasLocalScope() {
-				metrics.Identity.WithLabelValues(identity.NodeLocalIdentityType).Dec()
+				m.legacyMetrics.Identity.WithLabelValues(identity.NodeLocalIdentityType).Dec()
 			} else if id.ID.IsReservedIdentity() {
-				metrics.Identity.WithLabelValues(identity.ReservedIdentityType).Dec()
+				m.legacyMetrics.Identity.WithLabelValues(identity.ReservedIdentityType).Dec()
 			} else {
-				metrics.Identity.WithLabelValues(identity.ClusterLocalIdentityType).Dec()
+				m.legacyMetrics.Identity.WithLabelValues(identity.ClusterLocalIdentityType).Dec()
 			}
 		}
 		if m.owner != nil && released && notifyOwner {

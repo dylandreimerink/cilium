@@ -18,6 +18,7 @@ import (
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/loadbalancer"
 	"github.com/cilium/cilium/pkg/lock"
+	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/policy"
 	"github.com/cilium/cilium/pkg/policy/api"
@@ -194,6 +195,7 @@ func (s *K8sWatcherSuite) TestUpdateToServiceEndpointsGH9525(c *C) {
 		&fakeWatcherConfiguration{},
 		testipcache.NewMockIPCache(),
 		nil,
+		metrics.NewLegacyMetrics(),
 	)
 	go w.k8sServiceHandler()
 	swg := lock.NewStoppableWaitGroup()
@@ -516,6 +518,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ClusterIP(c *C) {
 		&fakeWatcherConfiguration{},
 		testipcache.NewMockIPCache(),
 		nil,
+		metrics.NewLegacyMetrics(),
 	)
 	go w.k8sServiceHandler()
 	swg := lock.NewStoppableWaitGroup()
@@ -667,6 +670,7 @@ func (s *K8sWatcherSuite) TestChangeSVCPort(c *C) {
 		&fakeWatcherConfiguration{},
 		testipcache.NewMockIPCache(),
 		nil,
+		metrics.NewLegacyMetrics(),
 	)
 	go w.k8sServiceHandler()
 	swg := lock.NewStoppableWaitGroup()
@@ -1147,6 +1151,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_NodePort(c *C) {
 		&fakeWatcherConfiguration{},
 		testipcache.NewMockIPCache(),
 		nil,
+		metrics.NewLegacyMetrics(),
 	)
 	go w.k8sServiceHandler()
 	swg := lock.NewStoppableWaitGroup()
@@ -1461,6 +1466,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_GH9576_1(c *C) {
 		&fakeWatcherConfiguration{},
 		testipcache.NewMockIPCache(),
 		nil,
+		metrics.NewLegacyMetrics(),
 	)
 	go w.k8sServiceHandler()
 	swg := lock.NewStoppableWaitGroup()
@@ -1768,6 +1774,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_GH9576_2(c *C) {
 		&fakeWatcherConfiguration{},
 		testipcache.NewMockIPCache(),
 		nil,
+		metrics.NewLegacyMetrics(),
 	)
 	go w.k8sServiceHandler()
 	swg := lock.NewStoppableWaitGroup()
@@ -2689,6 +2696,7 @@ func (s *K8sWatcherSuite) Test_addK8sSVCs_ExternalIPs(c *C) {
 		&fakeWatcherConfiguration{},
 		testipcache.NewMockIPCache(),
 		nil,
+		metrics.NewLegacyMetrics(),
 	)
 	go w.k8sServiceHandler()
 	swg := lock.NewStoppableWaitGroup()

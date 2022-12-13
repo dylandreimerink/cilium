@@ -148,6 +148,8 @@ type Controller struct {
 
 	// terminated is closed after the controller has been terminated
 	terminated chan struct{}
+
+	legacyMetrics *metrics.LegacyMetrics
 }
 
 // GetSuccessCount returns the number of successful controller runs
@@ -381,8 +383,12 @@ func (c *Controller) recordError(err error) {
 	c.lastErrorStamp = time.Now()
 	c.failureCount++
 	c.consecutiveErrors++
-	metrics.ControllerRuns.WithLabelValues(failure).Inc()
-	metrics.ControllerRunsDuration.WithLabelValues(failure).Observe(c.lastDuration.Seconds())
+	if metrics.ControllerRuns != nil {
+		metrics.ControllerRuns.WithLabelValues(failure).Inc()
+	}
+	if metrics.ControllerRunsDuration != nil {
+		metrics.ControllerRunsDuration.WithLabelValues(failure).Observe(c.lastDuration.Seconds())
+	}
 }
 
 // recordSuccess updates all statistic collection variables on success
@@ -393,6 +399,10 @@ func (c *Controller) recordSuccess() {
 	c.successCount++
 	c.consecutiveErrors = 0
 
-	metrics.ControllerRuns.WithLabelValues(success).Inc()
-	metrics.ControllerRunsDuration.WithLabelValues(success).Observe(c.lastDuration.Seconds())
+	if metrics.ControllerRuns != nil {
+		metrics.ControllerRuns.WithLabelValues(success).Inc()
+	}
+	if metrics.ControllerRunsDuration != nil {
+		metrics.ControllerRunsDuration.WithLabelValues(success).Observe(c.lastDuration.Seconds())
+	}
 }

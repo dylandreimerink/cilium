@@ -131,6 +131,8 @@ type Proxy struct {
 	// defaultEndpointInfoRegistry is the default instance implementing the
 	// EndpointInfoRegistry interface.
 	defaultEndpointInfoRegistry *endpointInfoRegistry
+
+	legacyMetrics *metrics.LegacyMetrics
 }
 
 // StartProxySupport starts the servers to support L7 proxies: xDS GRPC server
@@ -138,7 +140,7 @@ type Proxy struct {
 func StartProxySupport(minPort uint16, maxPort uint16, stateDir string,
 	accessLogNotifier logger.LogRecordNotifier, accessLogMetadata []string,
 	datapathUpdater DatapathUpdater, mgr EndpointLookup,
-	ipcache IPCacheManager) *Proxy {
+	ipcache IPCacheManager, legacyMetrics *metrics.LegacyMetrics) *Proxy {
 	endpointManager = mgr
 	eir := newEndpointInfoRegistry(ipcache)
 	logger.SetEndpointInfoRegistry(eir)
@@ -163,18 +165,19 @@ func StartProxySupport(minPort uint16, maxPort uint16, stateDir string,
 		datapathUpdater:             datapathUpdater,
 		ipcache:                     ipcache,
 		defaultEndpointInfoRegistry: eir,
+		legacyMetrics:               legacyMetrics,
 	}
 }
 
 // Overload XDSServer.UpsertEnvoyResources to start Envoy on demand
 func (p *Proxy) UpsertEnvoyResources(ctx context.Context, resources envoy.Resources, portAllocator envoy.PortAllocator) error {
-	startEnvoy(p.stateDir, p.XDSServer, nil)
+	startEnvoy(p.stateDir, p.XDSServer, nil, p.legacyMetrics)
 	return p.XDSServer.UpsertEnvoyResources(ctx, resources, portAllocator)
 }
 
 // Overload XDSServer.UpdateEnvoyResources to start Envoy on demand
 func (p *Proxy) UpdateEnvoyResources(ctx context.Context, old, new envoy.Resources, portAllocator envoy.PortAllocator) error {
-	startEnvoy(p.stateDir, p.XDSServer, nil)
+	startEnvoy(p.stateDir, p.XDSServer, nil, p.legacyMetrics)
 	return p.XDSServer.UpdateEnvoyResources(ctx, old, new, portAllocator)
 }
 
@@ -564,7 +567,7 @@ func (p *Proxy) CreateOrUpdateRedirect(ctx context.Context, l4 policy.ProxyPolic
 		case policy.ParserTypeDNS:
 			redir.implementation, err = createDNSRedirect(redir, dnsConfiguration{}, p.defaultEndpointInfoRegistry)
 		default:
-			redir.implementation, err = createEnvoyRedirect(redir, p.stateDir, p.XDSServer, p.datapathUpdater.SupportsOriginalSourceAddr(), wg)
+			redir.implementation, err = createEnvoyRedirect(redir, p.stateDir, p.XDSServer, p.datapathUpdater.SupportsOriginalSourceAddr(), wg, p.legacyMetrics)
 		}
 
 		if err == nil {
@@ -723,7 +726,7 @@ func (p *Proxy) updateRedirectMetrics() {
 		result[string(redirect.listener.proxyType)]++
 	}
 	for proto, count := range result {
-		metrics.ProxyRedirects.WithLabelValues(proto).Set(float64(count))
+		p.legacyMetrics.ProxyRedirects.WithLabelValues(proto).Set(float64(count))
 	}
 }
 

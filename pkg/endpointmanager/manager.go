@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 
 	"github.com/cilium/cilium/pkg/completion"
@@ -29,6 +28,7 @@ import (
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/mcastmanager"
 	"github.com/cilium/cilium/pkg/metrics"
+	"github.com/cilium/cilium/pkg/metrics/metric"
 	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/policy"
@@ -80,6 +80,8 @@ type EndpointManager struct {
 	// endpoints for removal on one run of the controller, then in the
 	// subsequent controller run will remove the endpoints.
 	markedEndpoints []uint16
+
+	legacyMetric *metrics.LegacyMetrics
 }
 
 // EndpointResourceSynchronizer is an interface which synchronizes CiliumEndpoint
@@ -94,13 +96,14 @@ type EndpointResourceSynchronizer interface {
 type endpointDeleteFunc func(*endpoint.Endpoint, endpoint.DeleteConfig) []error
 
 // NewEndpointManager creates a new EndpointManager.
-func NewEndpointManager(epSynchronizer EndpointResourceSynchronizer) *EndpointManager {
+func NewEndpointManager(epSynchronizer EndpointResourceSynchronizer, legacyMetric *metrics.LegacyMetrics) *EndpointManager {
 	mgr := EndpointManager{
 		endpoints:                    make(map[uint16]*endpoint.Endpoint),
 		endpointsAux:                 make(map[string]*endpoint.Endpoint),
 		mcastManager:                 mcastmanager.New(option.Config.IPv6MCastDevice),
 		EndpointResourceSynchronizer: epSynchronizer,
 		subscribers:                  make(map[Subscriber]struct{}),
+		legacyMetric:                 legacyMetric,
 	}
 	mgr.deleteEndpoint = mgr.removeEndpoint
 
@@ -189,14 +192,13 @@ func (mgr *EndpointManager) InitMetrics() {
 		// would result in negative counts.
 		// It must be thread-safe.
 
-		metrics.Endpoint = prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		mgr.legacyMetric.Endpoint = metric.NewGaugeFunc(metric.GaugeOpts{
 			Namespace: metrics.Namespace,
 			Name:      "endpoint",
 			Help:      "Number of endpoints managed by this agent",
 		},
 			func() float64 { return float64(len(mgr.GetEndpoints())) },
 		)
-		metrics.MustRegister(metrics.Endpoint)
 	})
 }
 
@@ -628,7 +630,7 @@ func (mgr *EndpointManager) AddHostEndpoint(
 	allocator cache.IdentityAllocator,
 	reason, nodeName string,
 ) error {
-	ep, err := endpoint.CreateHostEndpoint(owner, policyGetter, ipcache, proxy, allocator)
+	ep, err := endpoint.CreateHostEndpoint(owner, policyGetter, ipcache, proxy, allocator, mgr.legacyMetric)
 	if err != nil {
 		return err
 	}

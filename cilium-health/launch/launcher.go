@@ -17,6 +17,7 @@ import (
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
+	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/option"
 )
 
@@ -38,7 +39,7 @@ const (
 )
 
 // Launch starts the cilium-health server and returns a handle to obtain its status
-func Launch() (*CiliumHealth, error) {
+func Launch(legacyMetrics *metrics.LegacyMetrics) (*CiliumHealth, error) {
 	var (
 		err error
 		ch  = &CiliumHealth{}
@@ -49,6 +50,7 @@ func Launch() (*CiliumHealth, error) {
 		ProbeInterval: serverProbeInterval,
 		ProbeDeadline: serverProbeDeadline,
 		HTTPPathPort:  option.Config.ClusterHealthPort,
+		LegacyMetrics: legacyMetrics,
 	}
 
 	ch.server, err = server.NewServer(config)

@@ -206,19 +206,19 @@ func (d *Daemon) bootstrapFQDN(possibleEndpoints map[uint16]*endpoint.Endpoint, 
 			endpoints := d.endpointManager.GetEndpoints()
 			for _, ep := range endpoints {
 				epID := ep.StringID()
-				if option.Config.MetricsConfig.FQDNActiveNames || option.Config.MetricsConfig.FQDNActiveIPs {
+				if d.legacyMetrics.FQDNActiveNames.IsEnabled() || d.legacyMetrics.FQDNActiveIPs.IsEnabled() {
 					countFQDNs, countIPs := ep.DNSHistory.Count()
-					if option.Config.MetricsConfig.FQDNActiveNames {
-						metrics.FQDNActiveNames.WithLabelValues(epID).Set(float64(countFQDNs))
+					if d.legacyMetrics.FQDNActiveNames.IsEnabled() {
+						d.legacyMetrics.FQDNActiveNames.WithLabelValues(epID).Set(float64(countFQDNs))
 					}
-					if option.Config.MetricsConfig.FQDNActiveIPs {
-						metrics.FQDNActiveIPs.WithLabelValues(epID).Set(float64(countIPs))
+					if d.legacyMetrics.FQDNActiveIPs.IsEnabled() {
+						d.legacyMetrics.FQDNActiveIPs.WithLabelValues(epID).Set(float64(countIPs))
 					}
 				}
 				namesToClean = append(namesToClean, ep.DNSHistory.GC(GCStart, ep.DNSZombies)...)
 				alive, dead := ep.DNSZombies.GC()
-				if option.Config.MetricsConfig.FQDNActiveZombiesConnections {
-					metrics.FQDNAliveZombieConnections.WithLabelValues(epID).Set(float64(len(alive)))
+				if d.legacyMetrics.FQDNAliveZombieConnections.IsEnabled() {
+					d.legacyMetrics.FQDNAliveZombieConnections.WithLabelValues(epID).Set(float64(len(alive)))
 				}
 
 				// Alive zombie need to be added to the global cache as name->IP
@@ -268,7 +268,7 @@ func (d *Daemon) bootstrapFQDN(possibleEndpoints map[uint16]*endpoint.Endpoint, 
 			}
 			cfg.Cache.ReplaceFromCacheByNames(namesToClean, caches...)
 
-			metrics.FQDNGarbageCollectorCleanedTotal.Add(float64(len(namesToClean)))
+			d.legacyMetrics.FQDNGarbageCollectorCleanedTotal.Add(float64(len(namesToClean)))
 			_, err := d.dnsNameManager.ForceGenerateDNS(context.TODO(), namesToClean)
 			namesCount := len(namesToClean)
 			// Limit the amount of info level logging to some sane amount
@@ -427,21 +427,21 @@ func (d *Daemon) notifyOnDNSMsg(lookupTime time.Time, ep *endpoint.Endpoint, epI
 		stat.ProcessingTime.End(true)
 		stat.TotalTime.End(true)
 		if errors.As(stat.Err, &dnsproxy.ErrFailedAcquireSemaphore{}) || errors.As(stat.Err, &dnsproxy.ErrTimedOutAcquireSemaphore{}) {
-			metrics.FQDNSemaphoreRejectedTotal.Inc()
+			d.legacyMetrics.FQDNSemaphoreRejectedTotal.Inc()
 		}
-		metrics.ProxyUpstreamTime.WithLabelValues(metricError, metrics.L7DNS, totalTime).Observe(
+		d.legacyMetrics.ProxyUpstreamTime.WithLabelValues(metricError, metrics.L7DNS, totalTime).Observe(
 			stat.TotalTime.Total().Seconds())
-		metrics.ProxyUpstreamTime.WithLabelValues(metricError, metrics.L7DNS, upstreamTime).Observe(
+		d.legacyMetrics.ProxyUpstreamTime.WithLabelValues(metricError, metrics.L7DNS, upstreamTime).Observe(
 			stat.UpstreamTime.Total().Seconds())
-		metrics.ProxyUpstreamTime.WithLabelValues(metricError, metrics.L7DNS, processingTime).Observe(
+		d.legacyMetrics.ProxyUpstreamTime.WithLabelValues(metricError, metrics.L7DNS, processingTime).Observe(
 			stat.ProcessingTime.Total().Seconds())
-		metrics.ProxyUpstreamTime.WithLabelValues(metricError, metrics.L7DNS, semaphoreTime).Observe(
+		d.legacyMetrics.ProxyUpstreamTime.WithLabelValues(metricError, metrics.L7DNS, semaphoreTime).Observe(
 			stat.SemaphoreAcquireTime.Total().Seconds())
-		metrics.ProxyUpstreamTime.WithLabelValues(metricError, metrics.L7DNS, policyGenTime).Observe(
+		d.legacyMetrics.ProxyUpstreamTime.WithLabelValues(metricError, metrics.L7DNS, policyGenTime).Observe(
 			stat.PolicyGenerationTime.Total().Seconds())
-		metrics.ProxyUpstreamTime.WithLabelValues(metricError, metrics.L7DNS, policyCheckTime).Observe(
+		d.legacyMetrics.ProxyUpstreamTime.WithLabelValues(metricError, metrics.L7DNS, policyCheckTime).Observe(
 			stat.PolicyCheckTime.Total().Seconds())
-		metrics.ProxyUpstreamTime.WithLabelValues(metricError, metrics.L7DNS, dataplaneTime).Observe(
+		d.legacyMetrics.ProxyUpstreamTime.WithLabelValues(metricError, metrics.L7DNS, dataplaneTime).Observe(
 			stat.DataplaneTime.Total().Seconds())
 	}
 
@@ -575,7 +575,7 @@ func (d *Daemon) notifyOnDNSMsg(lookupTime time.Time, ep *endpoint.Endpoint, epI
 		select {
 		case <-updateCtx.Done():
 			log.Error("Timed out waiting for datapath updates of FQDN IP information; returning response")
-			metrics.ProxyDatapathUpdateTimeout.Inc()
+			d.legacyMetrics.ProxyDatapathUpdateTimeout.Inc()
 		case <-updateComplete:
 		}
 

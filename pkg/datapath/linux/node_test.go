@@ -12,6 +12,7 @@ import (
 	"github.com/cilium/cilium/pkg/cidr"
 	"github.com/cilium/cilium/pkg/datapath"
 	"github.com/cilium/cilium/pkg/datapath/fake"
+	"github.com/cilium/cilium/pkg/datapath/linux/ipsec"
 	"github.com/cilium/cilium/pkg/mtu"
 )
 
@@ -65,7 +66,7 @@ func (s *linuxTestSuite) TestCreateNodeRoute(c *check.C) {
 
 	fakeNodeAddressing := fake.NewNodeAddressing()
 
-	nodeHandler := NewNodeHandler(dpConfig, fakeNodeAddressing, nil)
+	nodeHandler := NewNodeHandler(dpConfig, fakeNodeAddressing, nil, ipsec.NewXFRMCollector().XfrmCollector)
 
 	c1 := cidr.MustParseCIDR("10.10.0.0/16")
 	generatedRoute, err := nodeHandler.(*linuxNodeHandler).createNodeRouteSpec(c1, false)

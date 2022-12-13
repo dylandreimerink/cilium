@@ -12,8 +12,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
-
-	"github.com/cilium/cilium/pkg/metrics"
 )
 
 const (
@@ -126,7 +124,7 @@ func (ipam *IPAM) allocateIP(ip net.IP, owner string, needSyncUpstream bool) (re
 	}).Debugf("Allocated specific IP")
 
 	ipam.owner[ip.String()] = owner
-	metrics.IpamEvent.WithLabelValues(metricAllocate, family).Inc()
+	ipam.legacyMetrics.IpamEvent.WithLabelValues(metricAllocate, family).Inc()
 	return
 }
 
@@ -164,7 +162,7 @@ func (ipam *IPAM) allocateNextFamily(family Family, owner string, needSyncUpstre
 				"owner": owner,
 			}).Debugf("Allocated random IP")
 			ipam.owner[result.IP.String()] = owner
-			metrics.IpamEvent.WithLabelValues(metricAllocate, string(family)).Inc()
+			ipam.legacyMetrics.IpamEvent.WithLabelValues(metricAllocate, string(family)).Inc()
 			return
 		}
 
@@ -280,7 +278,7 @@ func (ipam *IPAM) releaseIPLocked(ip net.IP) error {
 	delete(ipam.owner, ip.String())
 	delete(ipam.expirationTimers, ip.String())
 
-	metrics.IpamEvent.WithLabelValues(metricRelease, family).Inc()
+	ipam.legacyMetrics.IpamEvent.WithLabelValues(metricRelease, family).Inc()
 	return nil
 }
 

@@ -29,6 +29,7 @@ import (
   "golang.org/x/net/netutil"
   "golang.org/x/sys/unix"
 
+  ciliumMetric "github.com/cilium/cilium/pkg/metrics"
   {{ imports .DefaultImports }}
   {{ imports .Imports }}
 )
@@ -162,7 +163,7 @@ func intEnvOverride(orig int, def int, keys ...string) int {
 {{ end }}
 
 // NewServer creates a new api {{ humanize .Name }} server but does not configure it
-func NewServer(api *{{ .Package }}.{{ pascalize .Name }}API) *Server {
+func NewServer(api *{{ .Package }}.{{ pascalize .Name }}API, legacyMetrics *ciliumMetric.LegacyMetrics) *Server {
 	s := new(Server)
   {{ if not .UseGoStructFlags }}
 	s.EnabledListeners = enabledListeners
@@ -192,13 +193,14 @@ func NewServer(api *{{ .Package }}.{{ pascalize .Name }}API) *Server {
 	s.shutdown = make(chan struct{})
 	s.api = api
 	s.interrupt = make(chan os.Signal, 1)
+	s.LegacyMetrics = legacyMetrics
 	return s
 }
 
 // ConfigureAPI configures the API and handlers.
 func (s *Server) ConfigureAPI() {
     if s.api != nil {
-        s.handler = configureAPI(s.api)
+        s.handler = configureAPI(s.api, s.LegacyMetrics)
     }
 }
 
@@ -237,6 +239,8 @@ type Server struct {
 	TLSReadTimeout    time.Duration
 	TLSWriteTimeout   time.Duration
 	httpsServerL  net.Listener
+
+	LegacyMetrics *ciliumMetric.LegacyMetrics
 
 	{{ if .ExcludeSpec }}Spec string{{ end }}
 	api               *{{ .Package }}.{{ pascalize .Name }}API
@@ -277,7 +281,7 @@ func (s *Server) SetAPI(api *{{ .Package }}.{{ pascalize .Name }}API) {
 	}
 
 	s.api = api
-	s.handler = configureAPI(api)
+	s.handler = configureAPI(api, s.LegacyMetrics)
 }
 
 func (s *Server) hasScheme(scheme string) bool {

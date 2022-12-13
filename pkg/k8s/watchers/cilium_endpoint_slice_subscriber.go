@@ -12,7 +12,6 @@ import (
 	cilium_v2a1 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2alpha1"
 	k8sUtils "github.com/cilium/cilium/pkg/k8s/utils"
 	"github.com/cilium/cilium/pkg/lock"
-	"github.com/cilium/cilium/pkg/metrics"
 )
 
 type cesSubscriber struct {
@@ -38,7 +37,7 @@ func (cs *cesSubscriber) OnAdd(ces *cilium_v2a1.CiliumEndpointSlice) {
 		cepMap.insertCEP(ces.Namespace+"/"+ep.Name, ces.GetName())
 		if p := cs.kWatcher.endpointManager.LookupPodName(k8sUtils.GetObjNamespaceName(c)); p != nil {
 			timeSinceCepCreated := time.Since(p.GetCreatedAt())
-			metrics.EndpointPropagationDelay.WithLabelValues().Observe(timeSinceCepCreated.Seconds())
+			cs.kWatcher.legacyMetrics.EndpointPropagationDelay.WithLabelValues().Observe(timeSinceCepCreated.Seconds())
 		}
 		cs.kWatcher.endpointUpdated(nil, c)
 	}
@@ -94,7 +93,7 @@ func (cs *cesSubscriber) OnUpdate(oldCES, newCES *cilium_v2a1.CiliumEndpointSlic
 			c := k8s.ConvertCoreCiliumEndpointToTypesCiliumEndpoint(newCEP, newCES.Namespace)
 			if p := cs.kWatcher.endpointManager.LookupPodName(k8sUtils.GetObjNamespaceName(c)); p != nil {
 				timeSinceCepCreated := time.Since(p.GetCreatedAt())
-				metrics.EndpointPropagationDelay.WithLabelValues().Observe(timeSinceCepCreated.Seconds())
+				cs.kWatcher.legacyMetrics.EndpointPropagationDelay.WithLabelValues().Observe(timeSinceCepCreated.Seconds())
 			}
 			cs.kWatcher.endpointUpdated(nil, c)
 			cepMap.insertCEP(CEPName, oldCES.GetName())

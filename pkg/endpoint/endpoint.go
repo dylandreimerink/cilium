@@ -339,6 +339,8 @@ type Endpoint struct {
 	noTrackPort uint16
 
 	ciliumEndpointUID k8sTypes.UID
+
+	legacyMetrics *metrics.LegacyMetrics
 }
 
 type namedPortsGetter interface {
@@ -430,8 +432,8 @@ func (e *Endpoint) waitForProxyCompletions(proxyWaitGroup *completion.WaitGroup)
 }
 
 // NewEndpointWithState creates a new endpoint useful for testing purposes
-func NewEndpointWithState(owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator, ID uint16, state State) *Endpoint {
-	ep := createEndpoint(owner, policyGetter, namedPortsGetter, proxy, allocator, ID, "")
+func NewEndpointWithState(owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator, legacyMetrics *metrics.LegacyMetrics, ID uint16, state State) *Endpoint {
+	ep := createEndpoint(owner, policyGetter, namedPortsGetter, proxy, allocator, legacyMetrics, ID, "")
 	ep.state = state
 	ep.eventQueue = eventqueue.NewEventQueueBuffered(fmt.Sprintf("endpoint-%d", ID), option.Config.EndpointQueueSize)
 
@@ -442,7 +444,7 @@ func NewEndpointWithState(owner regeneration.Owner, policyGetter policyRepoGette
 	return ep
 }
 
-func createEndpoint(owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator, ID uint16, ifName string) *Endpoint {
+func createEndpoint(owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator, legacyMetrics *metrics.LegacyMetrics, ID uint16, ifName string) *Endpoint {
 	ep := &Endpoint{
 		owner:            owner,
 		policyGetter:     policyGetter,
@@ -464,6 +466,7 @@ func createEndpoint(owner regeneration.Owner, policyGetter policyRepoGetter, nam
 		allocator:        allocator,
 		logLimiter:       logging.NewLimiter(10*time.Second, 3), // 1 log / 10 secs, burst of 3
 		noTrackPort:      0,
+		legacyMetrics:    legacyMetrics,
 	}
 
 	ep.initDNSHistoryTrigger()
@@ -493,13 +496,13 @@ func (e *Endpoint) initDNSHistoryTrigger() {
 }
 
 // CreateHostEndpoint creates the endpoint corresponding to the host.
-func CreateHostEndpoint(owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator) (*Endpoint, error) {
+func CreateHostEndpoint(owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator, legacyMetrics *metrics.LegacyMetrics) (*Endpoint, error) {
 	mac, err := link.GetHardwareAddr(defaults.HostDevice)
 	if err != nil {
 		return nil, err
 	}
 
-	ep := createEndpoint(owner, policyGetter, namedPortsGetter, proxy, allocator, 0, defaults.HostDevice)
+	ep := createEndpoint(owner, policyGetter, namedPortsGetter, proxy, allocator, legacyMetrics, 0, defaults.HostDevice)
 	ep.isHost = true
 	ep.mac = mac
 	ep.nodeMAC = mac
@@ -800,7 +803,7 @@ func FilterEPDir(dirFiles []os.DirEntry) []string {
 // common.CiliumCHeaderPrefix + common.Version + ":" + endpointBase64
 // Note that the parse'd endpoint's identity is only partially restored. The
 // caller must call `SetIdentity()` to make the returned endpoint's identity useful.
-func parseEndpoint(ctx context.Context, owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, bEp []byte) (*Endpoint, error) {
+func parseEndpoint(ctx context.Context, owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, bEp []byte, legacyMetrics *metrics.LegacyMetrics) (*Endpoint, error) {
 	// TODO: Provide a better mechanism to update from old version once we bump
 	// TODO: cilium version.
 	epSlice := bytes.Split(bEp, []byte{':'})
@@ -828,6 +831,7 @@ func parseEndpoint(ctx context.Context, owner regeneration.Owner, policyGetter p
 	ep.realizedPolicy = ep.desiredPolicy
 	ep.controllers = controller.NewManager()
 	ep.regenFailedChan = make(chan struct{}, 1)
+	ep.legacyMetrics = legacyMetrics
 
 	ctx, cancel := context.WithCancel(ctx)
 	ep.aliveCancel = cancel
@@ -1161,7 +1165,7 @@ func (e *Endpoint) leaveLocked(proxyWaitGroup *completion.WaitGroup, conf Delete
 
 	e.setState(StateDisconnected, "Endpoint removed")
 
-	endpointPolicyStatus.Remove(e.ID)
+	endpointPolicyStatus.Remove(e.ID, e.legacyMetrics)
 	e.getLogger().Info("Removed endpoint")
 
 	return errors
@@ -1358,7 +1362,7 @@ OKState:
 	e.logStatusLocked(Other, OK, reason)
 
 	if fromState != "" {
-		metrics.EndpointStateCount.
+		e.legacyMetrics.EndpointStateCount.
 			WithLabelValues(string(fromState)).Dec()
 	}
 
@@ -1366,7 +1370,7 @@ OKState:
 	// the endpoint is gone or doesn't exist, we should not increment metrics
 	// for these states.
 	if toState != "" && toState != StateDisconnected && toState != StateInvalid {
-		metrics.EndpointStateCount.
+		e.legacyMetrics.EndpointStateCount.
 			WithLabelValues(string(toState)).Inc()
 	}
 	return true
@@ -1426,7 +1430,7 @@ OKState:
 	e.logStatusLocked(Other, OK, reason)
 
 	if fromState != "" {
-		metrics.EndpointStateCount.
+		e.legacyMetrics.EndpointStateCount.
 			WithLabelValues(string(fromState)).Dec()
 	}
 
@@ -1434,7 +1438,7 @@ OKState:
 	// the endpoint is gone or doesn't exist, we should not increment metrics
 	// for these states.
 	if toState != "" && toState != StateDisconnected && toState != StateInvalid {
-		metrics.EndpointStateCount.
+		e.legacyMetrics.EndpointStateCount.
 			WithLabelValues(string(toState)).Inc()
 	}
 	return true
@@ -1510,22 +1514,22 @@ func (e *Endpoint) UpdateProxyStatistics(l4Protocol string, port uint16, ingress
 	}
 
 	stats.Received++
-	metrics.ProxyReceived.Inc()
-	metrics.ProxyPolicyL7Total.WithLabelValues("received").Inc()
+	e.legacyMetrics.ProxyReceived.Inc()
+	e.legacyMetrics.ProxyPolicyL7Total.WithLabelValues("received").Inc()
 
 	switch verdict {
 	case accesslog.VerdictForwarded:
 		stats.Forwarded++
-		metrics.ProxyForwarded.Inc()
-		metrics.ProxyPolicyL7Total.WithLabelValues("forwarded").Inc()
+		e.legacyMetrics.ProxyForwarded.Inc()
+		e.legacyMetrics.ProxyPolicyL7Total.WithLabelValues("forwarded").Inc()
 	case accesslog.VerdictDenied:
 		stats.Denied++
-		metrics.ProxyDenied.Inc()
-		metrics.ProxyPolicyL7Total.WithLabelValues("denied").Inc()
+		e.legacyMetrics.ProxyDenied.Inc()
+		e.legacyMetrics.ProxyPolicyL7Total.WithLabelValues("denied").Inc()
 	case accesslog.VerdictError:
 		stats.Error++
-		metrics.ProxyParseErrors.Inc()
-		metrics.ProxyPolicyL7Total.WithLabelValues("parse_errors").Inc()
+		e.legacyMetrics.ProxyParseErrors.Inc()
+		e.legacyMetrics.ProxyPolicyL7Total.WithLabelValues("parse_errors").Inc()
 	}
 }
 

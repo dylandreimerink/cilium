@@ -310,6 +310,12 @@ func (h *Hive) PrintDotGraph() {
 	}
 }
 
+func (h *Hive) Populate() {
+	if err := h.populate(); err != nil {
+		log.WithError(err).Fatal("Failed to populate object graph")
+	}
+}
+
 // getEnvName returns the environment variable to be used for the given option name.
 func (h *Hive) getEnvName(option string) string {
 	under := strings.Replace(option, "-", "_", -1)

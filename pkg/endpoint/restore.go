@@ -30,6 +30,7 @@ import (
 	"github.com/cilium/cilium/pkg/labelsfilter"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/mac"
+	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/option"
 )
@@ -68,7 +69,7 @@ func hasHostObjectFile(epDir string) bool {
 // ReadEPsFromDirNames returns a mapping of endpoint ID to endpoint of endpoints
 // from a list of directory names that can possible contain an endpoint.
 func ReadEPsFromDirNames(ctx context.Context, owner regeneration.Owner, policyGetter policyRepoGetter,
-	namedPortsGetter namedPortsGetter, basePath string, eptsDirNames []string) map[uint16]*Endpoint {
+	namedPortsGetter namedPortsGetter, basePath string, eptsDirNames []string, legacyMetrics *metrics.LegacyMetrics) map[uint16]*Endpoint {
 
 	completeEPDirNames, incompleteEPDirNames := partitionEPDirNamesByRestoreStatus(eptsDirNames)
 
@@ -139,7 +140,7 @@ func ReadEPsFromDirNames(ctx context.Context, owner regeneration.Owner, policyGe
 			scopedLog.WithError(err).Warn("Unable to read the C header file")
 			continue
 		}
-		ep, err := parseEndpoint(ctx, owner, policyGetter, namedPortsGetter, bEp)
+		ep, err := parseEndpoint(ctx, owner, policyGetter, namedPortsGetter, bEp, legacyMetrics)
 		if err != nil {
 			scopedLog.WithError(err).Warn("Unable to parse the C header file")
 			continue

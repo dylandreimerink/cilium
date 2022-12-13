@@ -15,6 +15,7 @@ import (
 
 	"github.com/cilium/cilium/pkg/checker"
 	identityPkg "github.com/cilium/cilium/pkg/identity"
+	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/source"
 	testidentity "github.com/cilium/cilium/pkg/testutils/identity"
 	"github.com/cilium/cilium/pkg/types"
@@ -43,6 +44,7 @@ func (s *IPCacheTestSuite) SetUpTest(c *C) {
 		IdentityAllocator: allocator,
 		PolicyHandler:     &mockUpdater{},
 		DatapathHandler:   &mockTriggerer{},
+		LegacyMetrics:     metrics.NewLegacyMetrics(),
 	})
 
 	s.cleanup = func() {

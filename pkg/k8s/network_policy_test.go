@@ -21,6 +21,7 @@ import (
 	slim_metav1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
 	"github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/util/intstr"
 	"github.com/cilium/cilium/pkg/labels"
+	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/policy"
 	"github.com/cilium/cilium/pkg/policy/api"
 	testidentity "github.com/cilium/cilium/pkg/testutils/identity"
@@ -90,7 +91,7 @@ type DummySelectorCacheUser struct{}
 
 func testNewPolicyRepository() *policy.Repository {
 	idAllocator := testidentity.NewMockIdentityAllocator(nil)
-	repo := policy.NewPolicyRepository(idAllocator, nil, nil)
+	repo := policy.NewPolicyRepository(idAllocator, nil, nil, metrics.NewLegacyMetrics())
 	repo.GetSelectorCache().SetLocalIdentityNotifier(testidentity.NewDummyIdentityNotifier())
 	return repo
 }

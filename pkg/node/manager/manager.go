@@ -11,8 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-
 	"github.com/cilium/cilium/pkg/backoff"
 	"github.com/cilium/cilium/pkg/controller"
 	"github.com/cilium/cilium/pkg/datapath"
@@ -26,6 +24,7 @@ import (
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/metrics"
+	"github.com/cilium/cilium/pkg/metrics/metric"
 	"github.com/cilium/cilium/pkg/node/addressing"
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
 	"github.com/cilium/cilium/pkg/option"
@@ -115,21 +114,17 @@ type Manager struct {
 	// closeChan is closed when the manager is closed
 	closeChan chan struct{}
 
-	// name is the name of the manager. It must be unique and feasibility
-	// to be used a prometheus metric name.
-	name string
-
 	// metricEventsReceived is the prometheus metric to track the number of
 	// node events received
-	metricEventsReceived *prometheus.CounterVec
+	metricEventsReceived metric.Vec[metric.Counter]
 
 	// metricNumNodes is the prometheus metric to track the number of nodes
 	// being managed
-	metricNumNodes prometheus.Gauge
+	metricNumNodes metric.Gauge
 
 	// metricDatapathValidations is the prometheus metric to track the
 	// number of datapath node validation calls
-	metricDatapathValidations prometheus.Counter
+	metricDatapathValidations metric.Counter
 
 	// conf is the configuration of the caller passed in via NewManager.
 	// This field is immutable after NewManager()
@@ -190,9 +185,8 @@ func (m *Manager) Iter(f func(nh datapath.NodeHandler)) {
 }
 
 // NewManager returns a new node manager
-func NewManager(name string, dp datapath.NodeHandler, c Configuration, sc selectorCacheUpdater, pt policyTriggerer) (*Manager, error) {
+func NewManager(dp datapath.NodeHandler, c Configuration, sc selectorCacheUpdater, pt policyTriggerer, legacyMetrics *metrics.LegacyMetrics) (*Manager, error) {
 	m := &Manager{
-		name:                 name,
 		nodes:                map[nodeTypes.Identity]*nodeEntry{},
 		conf:                 c,
 		controllerManager:    controller.NewManager(),
@@ -200,34 +194,12 @@ func NewManager(name string, dp datapath.NodeHandler, c Configuration, sc select
 		policyTriggerer:      pt,
 		nodeHandlers:         map[datapath.NodeHandler]struct{}{},
 		closeChan:            make(chan struct{}),
+
+		metricEventsReceived:      legacyMetrics.NodeEventsReceived,
+		metricNumNodes:            legacyMetrics.NumNodes,
+		metricDatapathValidations: legacyMetrics.DatapathValidations,
 	}
 	m.Subscribe(dp)
-
-	m.metricEventsReceived = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Namespace: metrics.Namespace,
-		Subsystem: "nodes",
-		Name:      name + "_events_received_total",
-		Help:      "Number of node events received",
-	}, []string{"event_type", "source"})
-
-	m.metricNumNodes = prometheus.NewGauge(prometheus.GaugeOpts{
-		Namespace: metrics.Namespace,
-		Subsystem: "nodes",
-		Name:      name + "_num",
-		Help:      "Number of nodes managed",
-	})
-
-	m.metricDatapathValidations = prometheus.NewCounter(prometheus.CounterOpts{
-		Namespace: metrics.Namespace,
-		Subsystem: "nodes",
-		Name:      name + "_datapath_validations_total",
-		Help:      "Number of validation calls to implement the datapath implementation of a node",
-	})
-
-	err := metrics.RegisterList([]prometheus.Collector{m.metricDatapathValidations, m.metricEventsReceived, m.metricNumNodes})
-	if err != nil {
-		return nil, err
-	}
 
 	go m.backgroundSync()
 
@@ -258,10 +230,6 @@ func (m *Manager) Close() {
 	defer m.mutex.Unlock()
 
 	close(m.closeChan)
-
-	metrics.Unregister(m.metricNumNodes)
-	metrics.Unregister(m.metricEventsReceived)
-	metrics.Unregister(m.metricDatapathValidations)
 
 	// delete all nodes to clean up the datapath for each node
 	for _, n := range m.nodes {

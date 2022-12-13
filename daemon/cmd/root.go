@@ -55,7 +55,6 @@ var (
 
 func init() {
 	setupSleepBeforeFatal()
-	registerBootstrapMetrics()
 
 	Vp = agentHive.Viper()
 	agentHive.RegisterFlags(RootCmd.PersistentFlags())
@@ -72,7 +71,7 @@ func init() {
 }
 
 func runApp(cmd *cobra.Command, args []string) {
-	bootstrapStats.overall.Start()
+	overallBootstrap.Start()
 
 	if v, _ := cmd.Flags().GetBool("version"); v {
 		fmt.Printf("%s %s\n", cmd.Name(), version.Version)

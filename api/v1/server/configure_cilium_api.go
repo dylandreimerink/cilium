@@ -34,7 +34,7 @@ func configureFlags(api *restapi.CiliumAPIAPI) {
 	// api.CommandLineOptionsGroups = []swag.CommandLineOptionsGroup{ ... }
 }
 
-func configureAPI(api *restapi.CiliumAPIAPI) http.Handler {
+func configureAPI(api *restapi.CiliumAPIAPI, legacyMetrics *ciliumMetrics.LegacyMetrics) http.Handler {
 	// configure the api here
 	api.ServeError = errors.ServeError
 
@@ -270,7 +270,7 @@ func configureAPI(api *restapi.CiliumAPIAPI) http.Handler {
 		serverCancel()
 	}
 
-	return setupGlobalMiddleware(api.Serve(setupMiddlewares))
+	return setupGlobalMiddleware(api.Serve(setupMiddlewares), legacyMetrics)
 }
 
 // The TLS configuration before HTTPS server starts.
@@ -301,11 +301,11 @@ func setupMiddlewares(handler http.Handler) http.Handler {
 
 // The middleware configuration happens before anything, this middleware also applies to serving the swagger.json document.
 // So this is a good place to plug in a panic handling middleware, logging and metrics
-func setupGlobalMiddleware(handler http.Handler) http.Handler {
+func setupGlobalMiddleware(handler http.Handler, legacyMetrics *ciliumMetrics.LegacyMetrics) http.Handler {
 	eventsHelper := &ciliumMetrics.APIEventTSHelper{
 		Next:      handler,
-		TSGauge:   ciliumMetrics.EventTS,
-		Histogram: ciliumMetrics.APIInteractions,
+		TSGauge:   legacyMetrics.EventTS,
+		Histogram: legacyMetrics.APIInteractions,
 	}
 
 	return &api.APIPanicHandler{

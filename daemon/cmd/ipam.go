@@ -270,7 +270,7 @@ func (d *Daemon) allocateDatapathIPs(family types.NodeAddressingFamily) (routerI
 }
 
 func (d *Daemon) allocateHealthIPs() error {
-	bootstrapStats.healthCheck.Start()
+	d.bootstrapStats.healthCheck.Start()
 	if option.Config.EnableHealthChecking && option.Config.EnableEndpointHealthChecking {
 		if option.Config.EnableIPv4 {
 			result, err := d.ipam.AllocateNextFamilyWithoutSyncUpstream(ipam.IPv4, "health")
@@ -322,12 +322,12 @@ func (d *Daemon) allocateHealthIPs() error {
 			log.Debugf("IPv6 health endpoint address: %s", result.IP)
 		}
 	}
-	bootstrapStats.healthCheck.End(true)
+	d.bootstrapStats.healthCheck.End(true)
 	return nil
 }
 
 func (d *Daemon) allocateIngressIPs() error {
-	bootstrapStats.ingressIPAM.Start()
+	d.bootstrapStats.ingressIPAM.Start()
 	if option.Config.EnableEnvoyConfig {
 		if option.Config.EnableIPv4 {
 			var result *ipam.AllocationResult
@@ -421,12 +421,12 @@ func (d *Daemon) allocateIngressIPs() error {
 			log.Infof("  Ingress IPv6: %s", node.GetIngressIPv6())
 		}
 	}
-	bootstrapStats.ingressIPAM.End(true)
+	d.bootstrapStats.ingressIPAM.End(true)
 	return nil
 }
 
 func (d *Daemon) allocateIPs() error {
-	bootstrapStats.ipam.Start()
+	d.bootstrapStats.ipam.Start()
 	if option.Config.EnableIPv4 {
 		routerIP, err := d.allocateRouterIPv4(d.datapath.LocalNodeAddressing().IPv4())
 		if err != nil {
@@ -500,7 +500,7 @@ func (d *Daemon) allocateIPs() error {
 		}
 	}
 
-	bootstrapStats.ipam.End(true)
+	d.bootstrapStats.ipam.End(true)
 
 	if option.Config.EnableEnvoyConfig {
 		if err := d.allocateIngressIPs(); err != nil {
@@ -547,11 +547,11 @@ func (d *Daemon) configureIPAM() {
 }
 
 func (d *Daemon) startIPAM() {
-	bootstrapStats.ipam.Start()
+	d.bootstrapStats.ipam.Start()
 	log.Info("Initializing node addressing")
 	// Set up ipam conf after init() because we might be running d.conf.KVStoreIPv4Registration
-	d.ipam = ipam.NewIPAM(d.datapath.LocalNodeAddressing(), option.Config, d.nodeDiscovery, d.k8sWatcher, &d.mtuConfig, d.clientset)
-	bootstrapStats.ipam.End(true)
+	d.ipam = ipam.NewIPAM(d.datapath.LocalNodeAddressing(), option.Config, d.nodeDiscovery, d.k8sWatcher, &d.mtuConfig, d.clientset, d.legacyMetrics)
+	d.bootstrapStats.ipam.End(true)
 }
 
 func parseRoutingInfo(result *ipam.AllocationResult) (*linuxrouting.RoutingInfo, error) {

@@ -21,6 +21,7 @@ import (
 	k8smetrics "github.com/cilium/cilium/pkg/k8s/metrics"
 	k8sversion "github.com/cilium/cilium/pkg/k8s/version"
 	"github.com/cilium/cilium/pkg/logging"
+	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/testutils"
 )
@@ -230,6 +231,7 @@ func (s *K8sClientSuite) Test_client(c *C) {
 	hive := hive.New(
 		Cell,
 		cell.Invoke(func(c Clientset) { clientset = c }),
+		metrics.Cell,
 	)
 
 	// Set the server URL and use a low heartbeat timeout for quick test completion.

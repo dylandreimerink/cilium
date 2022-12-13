@@ -32,6 +32,7 @@ import (
 	"github.com/cilium/cilium/pkg/kvstore"
 	"github.com/cilium/cilium/pkg/kvstore/store"
 	"github.com/cilium/cilium/pkg/labels"
+	"github.com/cilium/cilium/pkg/metrics"
 	nodeStore "github.com/cilium/cilium/pkg/node/store"
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
 	"github.com/cilium/cilium/pkg/option"
@@ -45,11 +46,11 @@ type VMManager struct {
 	ciliumExternalWorkloadInformer cache.Controller
 }
 
-func NewVMManager(clientset k8sClient.Clientset) *VMManager {
+func NewVMManager(clientset k8sClient.Clientset, legacyMetrics *metrics.LegacyMetrics) *VMManager {
 	m := &VMManager{
 		ciliumClient: clientset,
 	}
-	m.identityAllocator = identityCache.NewCachingIdentityAllocator(m)
+	m.identityAllocator = identityCache.NewCachingIdentityAllocator(m, legacyMetrics)
 
 	if option.Config.EnableWellKnownIdentities {
 		identity.InitWellKnownIdentities(option.Config)

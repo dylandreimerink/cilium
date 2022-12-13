@@ -27,6 +27,7 @@ import (
 	k8sConst "github.com/cilium/cilium/pkg/k8s/apis/cilium.io"
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/logging/logfields"
+	"github.com/cilium/cilium/pkg/metrics"
 	monitorAPI "github.com/cilium/cilium/pkg/monitor/api"
 	"github.com/cilium/cilium/pkg/node"
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
@@ -193,7 +194,9 @@ func (e *Endpoint) regeneratePolicy() (retErr error) {
 	}
 
 	e.getLogger().Debug("Starting policy recalculation...")
-	stats := &policyRegenerationStatistics{}
+	stats := &policyRegenerationStatistics{
+		legacyMetrics: e.legacyMetrics,
+	}
 	stats.totalTime.Start()
 
 	stats.waitingForPolicyRepository.Start()
@@ -297,12 +300,14 @@ func (e *Endpoint) updateAndOverrideEndpointOptions(opts option.OptionMap) (opts
 }
 
 // Called with e.mutex UNlocked
-func (e *Endpoint) regenerate(ctx *regenerationContext) (retErr error) {
+func (e *Endpoint) regenerate(ctx *regenerationContext, legacyMetrics *metrics.LegacyMetrics) (retErr error) {
 	var revision uint64
 	var stateDirComplete bool
 	var err error
 
-	ctx.Stats = regenerationStatistics{}
+	ctx.Stats = regenerationStatistics{
+		legacyMetrics: legacyMetrics,
+	}
 	stats := &ctx.Stats
 	stats.totalTime.Start()
 	e.getLogger().WithFields(logrus.Fields{
@@ -575,8 +580,9 @@ func (e *Endpoint) Regenerate(regenMetadata *regeneration.ExternalRegenerationMe
 	regenContext := ParseExternalRegenerationMetadata(ctx, cFunc, regenMetadata)
 
 	epEvent := eventqueue.NewEvent(&EndpointRegenerationEvent{
-		regenContext: regenContext,
-		ep:           e,
+		regenContext:  regenContext,
+		ep:            e,
+		legacyMetrics: e.legacyMetrics,
 	})
 
 	// This may block if the Endpoint's EventQueue is full. This has to be done

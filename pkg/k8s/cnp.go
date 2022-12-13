@@ -52,6 +52,8 @@ type CNPStatusUpdateContext struct {
 	// WaitForEndpointsAtPolicyRev must point to a function that will wait
 	// for all local endpoints to reach the particular policy revision
 	WaitForEndpointsAtPolicyRev func(ctx context.Context, rev uint64) error
+
+	LegacyMetrics *metrics.LegacyMetrics
 }
 
 func (c *CNPStatusUpdateContext) updateStatus(ctx context.Context, cnp *types.SlimCNP, rev uint64, policyImportErr, waitForEPsErr error) (err error) {
@@ -173,7 +175,7 @@ retryLoop:
 
 	if c.UpdateDuration != nil {
 		latency := c.UpdateDuration.End(err == nil).Total()
-		metrics.KubernetesCNPStatusCompletion.WithLabelValues(fmt.Sprintf("%d", numAttempts), outcome).Observe(latency.Seconds())
+		c.LegacyMetrics.KubernetesCNPStatusCompletion.WithLabelValues(fmt.Sprintf("%d", numAttempts), outcome.Name).Observe(latency.Seconds())
 	}
 
 	return err

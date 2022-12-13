@@ -22,6 +22,7 @@ import (
 	"github.com/cilium/cilium/pkg/kvstore"
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/logging/logfields"
+	"github.com/cilium/cilium/pkg/metrics"
 )
 
 type getIdentity struct {
@@ -104,9 +105,9 @@ type cachingIdentityAllocator struct {
 	d *Daemon
 }
 
-func NewCachingIdentityAllocator(d *Daemon) cachingIdentityAllocator {
+func NewCachingIdentityAllocator(d *Daemon, legacyMetrics *metrics.LegacyMetrics) cachingIdentityAllocator {
 	return cachingIdentityAllocator{
-		CachingIdentityAllocator: cache.NewCachingIdentityAllocator(d),
+		CachingIdentityAllocator: cache.NewCachingIdentityAllocator(d, legacyMetrics),
 		d:                        d,
 	}
 }

@@ -205,6 +205,11 @@ type Daemon struct {
 
 	// BIG-TCP config values
 	bigTCPConfig bigtcp.Configuration
+
+	metricsRegistry *metrics.Registry
+	legacyMetrics   *metrics.LegacyMetrics
+
+	bootstrapStats *BootstrapTimes
 }
 
 // GetPolicyRepository returns the policy repository of the daemon
@@ -377,6 +382,10 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup,
 	epMgr *endpointmanager.EndpointManager, dp datapath.Datapath,
 	wgAgent *wg.Agent,
 	clientset k8sClient.Clientset,
+	metricsRegistry *metrics.Registry,
+	legacyMetrics *metrics.LegacyMetrics,
+	bootstrapStats *BootstrapTimes,
+	apiRateLimitingMetrics *apiRateLimitingMetrics,
 ) (*Daemon, *endpointRestoreState, error) {
 
 	var (
@@ -411,7 +420,7 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup,
 		}
 	}
 
-	apiLimiterSet, err := rate.NewAPILimiterSet(option.Config.APIRateLimit, apiRateLimitDefaults, &apiRateLimitingMetrics{})
+	apiLimiterSet, err := rate.NewAPILimiterSet(option.Config.APIRateLimit, apiRateLimitDefaults, apiRateLimitingMetrics)
 	if err != nil {
 		log.WithError(err).Error("unable to configure API rate limiting")
 		return nil, nil, fmt.Errorf("unable to configure API rate limiting: %w", err)
@@ -488,18 +497,18 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup,
 		externalIP,
 	)
 
-	nodeMngr, err := nodemanager.NewManager("all", dp.Node(), option.Config, nil, nil)
+	nodeMngr, err := nodemanager.NewManager(dp.Node(), option.Config, nil, nil, legacyMetrics)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	identity.IterateReservedIdentities(func(_ identity.NumericIdentity, _ *identity.Identity) {
-		metrics.Identity.WithLabelValues(identity.ReservedIdentityType).Inc()
+		legacyMetrics.Identity.WithLabelValues(identity.ReservedIdentityType).Inc()
 	})
 	if option.Config.EnableWellKnownIdentities {
 		// Must be done before calling policy.NewPolicyRepository() below.
 		num := identity.InitWellKnownIdentities(option.Config)
-		metrics.Identity.WithLabelValues(identity.WellKnownIdentityType).Add(float64(num))
+		legacyMetrics.Identity.WithLabelValues(identity.WellKnownIdentityType).Add(float64(num))
 	}
 
 	nd := nodediscovery.NewNodeDiscovery(nodeMngr, clientset, mtuConfig, netConf)
@@ -523,6 +532,9 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup,
 		endpointCreations: newEndpointCreationManager(clientset),
 		apiLimiterSet:     apiLimiterSet,
 		controllers:       controller.NewManager(),
+		metricsRegistry:   metricsRegistry,
+		legacyMetrics:     legacyMetrics,
+		bootstrapStats:    bootstrapStats,
 	}
 
 	if option.Config.RunMonitorAgent {
@@ -575,7 +587,7 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup,
 	//
 	// TODO: convert these package level variables to types for easier unit
 	// testing in the future.
-	d.identityAllocator = NewCachingIdentityAllocator(&d)
+	d.identityAllocator = NewCachingIdentityAllocator(&d, legacyMetrics)
 	if err := d.initPolicy(epMgr); err != nil {
 		return nil, nil, fmt.Errorf("error while initializing policy subsystem: %w", err)
 	}
@@ -584,6 +596,7 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup,
 		IdentityAllocator: d.identityAllocator,
 		PolicyHandler:     d.policy.GetSelectorCache(),
 		DatapathHandler:   epMgr,
+		LegacyMetrics:     legacyMetrics,
 	})
 	// Preallocate IDs for old CIDRs. This must be done before any Identity allocations are
 	// possible so that the old IDs are still available. That is why we do this ASAP after the
@@ -628,7 +641,7 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup,
 	// FIXME: Make the port range configurable.
 	if option.Config.EnableL7Proxy {
 		d.l7Proxy = proxy.StartProxySupport(10000, 20000, option.Config.RunDir,
-			&d, option.Config.AgentLabels, d.datapath, d.endpointManager, d.ipcache)
+			&d, option.Config.AgentLabels, d.datapath, d.endpointManager, d.ipcache, legacyMetrics)
 	} else {
 		log.Info("L7 proxies are disabled")
 		if option.Config.EnableEnvoyConfig {
@@ -639,11 +652,11 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup,
 	bootstrapStats.proxyStart.End(true)
 
 	// Start service support after proxy support so that we can inject 'd.l7Proxy`.
-	d.svc = service.NewService(&d, d.l7Proxy, d.datapath.LBMap())
+	d.svc = service.NewService(&d, d.l7Proxy, d.datapath.LBMap(), legacyMetrics)
 
 	d.redirectPolicyManager = redirectpolicy.NewRedirectPolicyManager(d.svc)
 	if option.Config.BGPAnnounceLBIP || option.Config.BGPAnnouncePodCIDR {
-		d.bgpSpeaker, err = speaker.New(ctx, clientset, speaker.Opts{
+		d.bgpSpeaker, err = speaker.New(ctx, clientset, legacyMetrics, speaker.Opts{
 			LoadBalancerIP: option.Config.BGPAnnounceLBIP,
 			PodCIDR:        option.Config.BGPAnnouncePodCIDR,
 		})
@@ -674,6 +687,7 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup,
 		option.Config,
 		d.ipcache,
 		d.cgroupManager,
+		d.legacyMetrics,
 	)
 	nd.RegisterK8sGetters(d.k8sWatcher)
 
@@ -1285,8 +1299,8 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup,
 
 // WithDefaultEndpointManager creates the default endpoint manager with a
 // functional endpoint synchronizer.
-func WithDefaultEndpointManager(ctx context.Context, clientset client.Clientset, checker endpointmanager.EndpointCheckerFunc) *endpointmanager.EndpointManager {
-	mgr := WithCustomEndpointManager(&watchers.EndpointSynchronizer{Clientset: clientset})
+func WithDefaultEndpointManager(ctx context.Context, clientset client.Clientset, checker endpointmanager.EndpointCheckerFunc, legacyMetrics *metrics.LegacyMetrics) *endpointmanager.EndpointManager {
+	mgr := WithCustomEndpointManager(&watchers.EndpointSynchronizer{Clientset: clientset}, legacyMetrics)
 	if option.Config.EndpointGCInterval > 0 {
 		mgr = mgr.WithPeriodicEndpointGC(ctx, checker, option.Config.EndpointGCInterval)
 	}
@@ -1296,12 +1310,12 @@ func WithDefaultEndpointManager(ctx context.Context, clientset client.Clientset,
 // WithCustomEndpointManager creates the custom endpoint manager with the
 // provided endpoint synchronizer. This is useful for tests which want to mock
 // out the real endpoint synchronizer.
-func WithCustomEndpointManager(s endpointmanager.EndpointResourceSynchronizer) *endpointmanager.EndpointManager {
-	return endpointmanager.NewEndpointManager(s)
+func WithCustomEndpointManager(s endpointmanager.EndpointResourceSynchronizer, legacyMetrics *metrics.LegacyMetrics) *endpointmanager.EndpointManager {
+	return endpointmanager.NewEndpointManager(s, legacyMetrics)
 }
 
 func (d *Daemon) bootstrapClusterMesh(nodeMngr *nodemanager.Manager) {
-	bootstrapStats.clusterMeshInit.Start()
+	d.bootstrapStats.clusterMeshInit.Start()
 	if path := option.Config.ClusterMeshConfig; path != "" {
 		if option.Config.ClusterID == 0 {
 			log.Info("Cluster-ID is not specified, skipping ClusterMesh initialization")
@@ -1324,7 +1338,7 @@ func (d *Daemon) bootstrapClusterMesh(nodeMngr *nodemanager.Manager) {
 			d.clustermesh = clustermesh
 		}
 	}
-	bootstrapStats.clusterMeshInit.End(true)
+	d.bootstrapStats.clusterMeshInit.End(true)
 }
 
 // ReloadOnDeviceChange regenerates device related information and reloads the datapath.

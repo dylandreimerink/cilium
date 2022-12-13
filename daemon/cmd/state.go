@@ -132,7 +132,7 @@ func (d *Daemon) fetchOldEndpoints(dir string) (*endpointRestoreState, error) {
 	}
 	eptsID := endpoint.FilterEPDir(dirFiles)
 
-	state.possible = endpoint.ReadEPsFromDirNames(d.ctx, d, d, d.ipcache, dir, eptsID)
+	state.possible = endpoint.ReadEPsFromDirNames(d.ctx, d, d, d.ipcache, dir, eptsID, d.legacyMetrics)
 
 	if len(state.possible) == 0 {
 		log.Info("No old endpoints found.")
@@ -383,7 +383,7 @@ func (d *Daemon) allocateIPsLocked(ep *endpoint.Endpoint) error {
 }
 
 func (d *Daemon) initRestore(restoredEndpoints *endpointRestoreState) chan struct{} {
-	bootstrapStats.restore.Start()
+	d.bootstrapStats.restore.Start()
 	var restoreComplete chan struct{}
 	if option.Config.RestoreState {
 		// When we regenerate restored endpoints, it is guaranteed tha we have
@@ -428,7 +428,7 @@ func (d *Daemon) initRestore(restoredEndpoints *endpointRestoreState) chan struc
 		// No restore happened, end parallel map mode immediately
 		endParallelMapMode()
 	}
-	bootstrapStats.restore.End(true)
+	d.bootstrapStats.restore.End(true)
 
 	return restoreComplete
 }

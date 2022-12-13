@@ -62,6 +62,8 @@ type Configuration struct {
 	cache.IdentityAllocator
 	ipcacheTypes.PolicyHandler
 	ipcacheTypes.DatapathHandler
+
+	LegacyMetrics *metrics.LegacyMetrics
 }
 
 // IPCache is a collection of mappings:
@@ -304,7 +306,7 @@ func (ipc *IPCache) upsertLocked(
 	cachedIdentity, found := ipc.ipToIdentityCache[ip]
 	if found {
 		if !force && !source.AllowOverwrite(cachedIdentity.Source, newIdentity.Source) {
-			metrics.IPCacheErrorsTotal.WithLabelValues(
+			ipc.Configuration.LegacyMetrics.IPCacheErrorsTotal.WithLabelValues(
 				metricTypeUpsert, metricErrorOverwrite,
 			).Inc()
 			return false, NewErrOverwrite(cachedIdentity.Source, newIdentity.Source)
@@ -314,7 +316,7 @@ func (ipc *IPCache) upsertLocked(
 		// and the host IP hasn't changed.
 		if cachedIdentity == newIdentity && oldHostIP.Equal(hostIP) &&
 			hostKey == oldHostKey && metaEqual {
-			metrics.IPCacheErrorsTotal.WithLabelValues(
+			ipc.Configuration.LegacyMetrics.IPCacheErrorsTotal.WithLabelValues(
 				metricTypeUpsert, metricErrorIdempotent,
 			).Inc()
 			return false, nil
@@ -364,7 +366,7 @@ func (ipc *IPCache) upsertLocked(
 			logfields.Identity: newIdentity,
 			logfields.Key:      hostKey,
 		}).Error("Attempt to upsert invalid IP into ipcache layer")
-		metrics.IPCacheErrorsTotal.WithLabelValues(
+		ipc.Configuration.LegacyMetrics.IPCacheErrorsTotal.WithLabelValues(
 			metricTypeUpsert, metricErrorInvalid,
 		).Inc()
 		return false, NewErrInvalidIP(ip)
@@ -428,7 +430,7 @@ func (ipc *IPCache) upsertLocked(
 		}
 	}
 
-	metrics.IPCacheEventsTotal.WithLabelValues(
+	ipc.Configuration.LegacyMetrics.IPCacheEventsTotal.WithLabelValues(
 		metricTypeUpsert,
 	).Inc()
 	return namedPortsChanged, nil
@@ -508,7 +510,7 @@ func (ipc *IPCache) deleteLocked(ip string, source source.Source) (namedPortsCha
 	cachedIdentity, found := ipc.ipToIdentityCache[ip]
 	if !found {
 		scopedLog.Warn("Attempt to remove non-existing IP from ipcache layer")
-		metrics.IPCacheErrorsTotal.WithLabelValues(
+		ipc.Configuration.LegacyMetrics.IPCacheErrorsTotal.WithLabelValues(
 			metricTypeDelete, metricErrorNoExist,
 		).Inc()
 		return false
@@ -517,7 +519,7 @@ func (ipc *IPCache) deleteLocked(ip string, source source.Source) (namedPortsCha
 	if cachedIdentity.Source != source {
 		scopedLog.WithField("source", cachedIdentity.Source).
 			Debugf("Skipping delete of identity from source %s", source)
-		metrics.IPCacheErrorsTotal.WithLabelValues(
+		ipc.Configuration.LegacyMetrics.IPCacheErrorsTotal.WithLabelValues(
 			metricTypeDelete, metricErrorOverwrite,
 		).Inc()
 		return false
@@ -565,7 +567,7 @@ func (ipc *IPCache) deleteLocked(ip string, source source.Source) (namedPortsCha
 		}
 	} else {
 		scopedLog.Error("Attempt to delete invalid IP from ipcache layer")
-		metrics.IPCacheErrorsTotal.WithLabelValues(
+		ipc.Configuration.LegacyMetrics.IPCacheErrorsTotal.WithLabelValues(
 			metricTypeDelete, metricErrorInvalid,
 		).Inc()
 		return false
@@ -594,7 +596,7 @@ func (ipc *IPCache) deleteLocked(ip string, source source.Source) (namedPortsCha
 		}
 	}
 
-	metrics.IPCacheEventsTotal.WithLabelValues(
+	ipc.Configuration.LegacyMetrics.IPCacheEventsTotal.WithLabelValues(
 		metricTypeDelete,
 	).Inc()
 	return namedPortsChanged

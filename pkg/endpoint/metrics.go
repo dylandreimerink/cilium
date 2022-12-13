@@ -6,12 +6,11 @@ package endpoint
 import (
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-
 	"github.com/cilium/cilium/api/v1/models"
 	loaderMetrics "github.com/cilium/cilium/pkg/datapath/loader/metrics"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/metrics"
+	"github.com/cilium/cilium/pkg/metrics/metric"
 	"github.com/cilium/cilium/pkg/spanstat"
 )
 
@@ -25,7 +24,7 @@ type statistics interface {
 	GetMap() map[string]*spanstat.SpanStat
 }
 
-func sendMetrics(stats statistics, metric prometheus.ObserverVec) {
+func sendMetrics(stats statistics, metric metric.Vec[metric.Observer]) {
 	for scope, stat := range stats.GetMap() {
 		// Skip scopes that have not been hit (zero duration), so the count in
 		// the histogram accurately reflects the number of times each scope is
@@ -53,22 +52,24 @@ type regenerationStatistics struct {
 	datapathRealization    loaderMetrics.SpanStat
 	mapSync                spanstat.SpanStat
 	prepareBuild           spanstat.SpanStat
+
+	legacyMetrics *metrics.LegacyMetrics
 }
 
 // SendMetrics sends the regeneration statistics for this endpoint to
 // Prometheus.
 func (s *regenerationStatistics) SendMetrics() {
-	endpointPolicyStatus.Update(s.endpointID, s.policyStatus)
+	endpointPolicyStatus.Update(s.endpointID, s.policyStatus, s.legacyMetrics)
 
 	if !s.success {
 		// Endpoint regeneration failed, increase on failed metrics
-		metrics.EndpointRegenerationTotal.WithLabelValues(metrics.LabelValueOutcomeFail).Inc()
+		s.legacyMetrics.EndpointRegenerationTotal.WithLabelValues(metrics.LabelValueOutcomeFail.Name).Inc()
 		return
 	}
 
-	metrics.EndpointRegenerationTotal.WithLabelValues(metrics.LabelValueOutcomeSuccess).Inc()
+	s.legacyMetrics.EndpointRegenerationTotal.WithLabelValues(metrics.LabelValueOutcomeSuccess.Name).Inc()
 
-	sendMetrics(s, metrics.EndpointRegenerationTimeStats)
+	sendMetrics(s, s.legacyMetrics.EndpointRegenerationTimeStats)
 }
 
 // GetMap returns a map which key is the stat name and the value is the stat
@@ -96,12 +97,14 @@ type policyRegenerationStatistics struct {
 	waitingForIdentityCache    spanstat.SpanStat
 	waitingForPolicyRepository spanstat.SpanStat
 	policyCalculation          spanstat.SpanStat
+
+	legacyMetrics *metrics.LegacyMetrics
 }
 
 func (ps *policyRegenerationStatistics) SendMetrics() {
-	metrics.PolicyRegenerationCount.Inc()
+	ps.legacyMetrics.PolicyRegenerationCount.Inc()
 
-	sendMetrics(ps, metrics.PolicyRegenerationTimeStats)
+	sendMetrics(ps, ps.legacyMetrics.PolicyRegenerationTimeStats)
 }
 
 func (ps *policyRegenerationStatistics) GetMap() map[string]*spanstat.SpanStat {
@@ -126,23 +129,23 @@ func newEndpointPolicyStatusMap() endpointPolicyStatusMap {
 
 // Update adds or updates a new endpoint to the map and update the metrics
 // related
-func (epPolicyMaps *endpointPolicyStatusMap) Update(endpointID uint16, policyStatus models.EndpointPolicyEnabled) {
+func (epPolicyMaps *endpointPolicyStatusMap) Update(endpointID uint16, policyStatus models.EndpointPolicyEnabled, legacyMetrics *metrics.LegacyMetrics) {
 	epPolicyMaps.mutex.Lock()
 	epPolicyMaps.m[endpointID] = policyStatus
 	epPolicyMaps.mutex.Unlock()
-	endpointPolicyStatus.UpdateMetrics()
+	endpointPolicyStatus.UpdateMetrics(legacyMetrics)
 }
 
 // Remove deletes the given endpoint from the map and update the metrics
-func (epPolicyMaps *endpointPolicyStatusMap) Remove(endpointID uint16) {
+func (epPolicyMaps *endpointPolicyStatusMap) Remove(endpointID uint16, legacyMetrics *metrics.LegacyMetrics) {
 	epPolicyMaps.mutex.Lock()
 	delete(epPolicyMaps.m, endpointID)
 	epPolicyMaps.mutex.Unlock()
-	epPolicyMaps.UpdateMetrics()
+	epPolicyMaps.UpdateMetrics(legacyMetrics)
 }
 
 // UpdateMetrics update the policy enforcement metrics statistics for the endpoints.
-func (epPolicyMaps *endpointPolicyStatusMap) UpdateMetrics() {
+func (epPolicyMaps *endpointPolicyStatusMap) UpdateMetrics(legacyMetrics *metrics.LegacyMetrics) {
 	policyStatus := map[models.EndpointPolicyEnabled]float64{
 		models.EndpointPolicyEnabledNone:             0,
 		models.EndpointPolicyEnabledEgress:           0,
@@ -160,6 +163,6 @@ func (epPolicyMaps *endpointPolicyStatusMap) UpdateMetrics() {
 	epPolicyMaps.mutex.Unlock()
 
 	for k, v := range policyStatus {
-		metrics.PolicyEndpointStatus.WithLabelValues(string(k)).Set(v)
+		legacyMetrics.PolicyEndpointStatus.WithLabelValues(string(k)).Set(v)
 	}
 }

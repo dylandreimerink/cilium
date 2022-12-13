@@ -9,9 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"net/url"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -19,7 +17,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/cache"
-	k8s_metrics "k8s.io/client-go/tools/metrics"
 
 	"github.com/cilium/cilium/pkg/cidr"
 	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
@@ -93,14 +90,6 @@ func init() {
 	runtime.ErrorHandlers = []func(error){
 		k8s.K8sErrorHandler,
 	}
-
-	k8s_metrics.Register(k8s_metrics.RegisterOpts{
-		ClientCertExpiry:      nil,
-		ClientCertRotationAge: nil,
-		RequestLatency:        &k8sMetrics{},
-		RateLimiterLatency:    nil,
-		RequestResult:         &k8sMetrics{},
-	})
 }
 
 var (
@@ -279,6 +268,8 @@ type K8sWatcher struct {
 	networkpolicyStore cache.Store
 
 	cfg WatcherConfiguration
+
+	legacyMetrics *metrics.LegacyMetrics
 }
 
 func NewK8sWatcher(
@@ -296,6 +287,7 @@ func NewK8sWatcher(
 	cfg WatcherConfiguration,
 	ipcache ipcacheManager,
 	cgroupManager cgroupManager,
+	legacyMetrics *metrics.LegacyMetrics,
 ) *K8sWatcher {
 	return &K8sWatcher{
 		clientset:             clientset,
@@ -318,29 +310,8 @@ func NewK8sWatcher(
 		CiliumNodeChain:       subscriber.NewCiliumNodeChain(),
 		envoyConfigManager:    envoyConfigManager,
 		cfg:                   cfg,
+		legacyMetrics:         legacyMetrics,
 	}
-}
-
-// k8sMetrics implements the LatencyMetric and ResultMetric interface from
-// k8s client-go package
-type k8sMetrics struct{}
-
-func (*k8sMetrics) Observe(_ context.Context, verb string, u url.URL, latency time.Duration) {
-	metrics.KubernetesAPIInteractions.WithLabelValues(u.Path, verb).Observe(latency.Seconds())
-}
-
-func (*k8sMetrics) Increment(_ context.Context, code string, method string, host string) {
-	metrics.KubernetesAPICallsTotal.WithLabelValues(host, method, code).Inc()
-	// The 'code' is set to '<error>' in case an error is returned from k8s
-	// more info:
-	// https://github.com/kubernetes/client-go/blob/v0.18.0-rc.1/rest/request.go#L700-L703
-	if code != "<error>" {
-		// Consider success only if status code is 2xx
-		if strings.HasPrefix(code, "2") {
-			k8smetrics.LastSuccessInteraction.Reset()
-		}
-	}
-	k8smetrics.LastInteraction.Reset()
 }
 
 // WaitForCacheSync blocks until the given resources have been synchronized from k8s.  Note that if
@@ -961,7 +932,7 @@ func (k *K8sWatcher) K8sEventProcessed(scope, action string, status bool) {
 		result = "failed"
 	}
 
-	metrics.KubernetesEventProcessed.WithLabelValues(scope, action, result).Inc()
+	k.legacyMetrics.KubernetesEventProcessed.WithLabelValues(scope, action, result).Inc()
 }
 
 // K8sEventReceived does metric accounting for each received Kubernetes event, as well
@@ -969,10 +940,10 @@ func (k *K8sWatcher) K8sEventProcessed(scope, action string, status bool) {
 func (k *K8sWatcher) K8sEventReceived(apiResourceName, scope, action string, valid, equal bool) {
 	k8smetrics.LastInteraction.Reset()
 
-	metrics.EventTS.WithLabelValues(metrics.LabelEventSourceK8s, scope, action).SetToCurrentTime()
+	k.legacyMetrics.EventTS.WithLabelValues(metrics.LabelEventSourceK8s.Name, scope, action).SetToCurrentTime()
 	validStr := strconv.FormatBool(valid)
 	equalStr := strconv.FormatBool(equal)
-	metrics.KubernetesEventReceived.WithLabelValues(scope, action, validStr, equalStr).Inc()
+	k.legacyMetrics.KubernetesEventReceived.WithLabelValues(scope, action, validStr, equalStr).Inc()
 
 	k.k8sResourceSynced.SetEventTimestamp(apiResourceName)
 }

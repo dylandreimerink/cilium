@@ -13,14 +13,16 @@ import (
 	"github.com/cilium/cilium/pkg/eventqueue"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/maps/bwmap"
+	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/policy"
 )
 
 // EndpointRegenerationEvent contains all fields necessary to regenerate an endpoint.
 type EndpointRegenerationEvent struct {
-	regenContext *regenerationContext
-	ep           *Endpoint
+	regenContext  *regenerationContext
+	ep            *Endpoint
+	legacyMetrics *metrics.LegacyMetrics
 }
 
 // Handle handles the regeneration event for the endpoint.
@@ -50,7 +52,7 @@ func (ev *EndpointRegenerationEvent) Handle(res chan interface{}) {
 
 		regenContext.DoneFunc = doneFunc
 
-		err = ev.ep.regenerate(ev.regenContext)
+		err = ev.ep.regenerate(ev.regenContext, ev.legacyMetrics)
 
 		doneFunc()
 		e.notifyEndpointRegeneration(err)

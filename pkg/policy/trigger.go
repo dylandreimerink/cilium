@@ -28,11 +28,13 @@ func (u *Updater) TriggerPolicyUpdates(force bool, reason string) {
 
 // NewUpdater returns a new Updater instance to handle triggering policy
 // updates ready for use.
-func NewUpdater(r *Repository, regen regenerator) (*Updater, error) {
+func NewUpdater(r *Repository, regen regenerator, legacyMetrics *metrics.LegacyMetrics) (*Updater, error) {
 	t, err := trigger.NewTrigger(trigger.Parameters{
-		Name:            "policy_update",
-		MetricsObserver: &TriggerMetrics{},
-		MinInterval:     option.Config.PolicyTriggerInterval,
+		Name: "policy_update",
+		MetricsObserver: &TriggerMetrics{
+			LegacyMetics: legacyMetrics,
+		},
+		MinInterval: option.Config.PolicyTriggerInterval,
 		// Triggers policy updates for every local endpoint.
 		// This may be called in a variety of situations: after policy changes,
 		// changes in agent configuration, changes in endpoint labels, and
@@ -71,20 +73,23 @@ type regenerator interface {
 }
 
 // TriggerMetrics handles the metrics for trigger policy recalculations.
-type TriggerMetrics struct{}
+// TODO(dylandreimerink): make into a metric cell
+type TriggerMetrics struct {
+	LegacyMetics *metrics.LegacyMetrics
+}
 
 func (p *TriggerMetrics) QueueEvent(reason string) {
-	if option.Config.MetricsConfig.TriggerPolicyUpdateTotal {
-		metrics.TriggerPolicyUpdateTotal.WithLabelValues(reason).Inc()
+	if p.LegacyMetics.TriggerPolicyUpdateTotal.IsEnabled() {
+		p.LegacyMetics.TriggerPolicyUpdateTotal.WithLabelValues(reason).Inc()
 	}
 }
 
 func (p *TriggerMetrics) PostRun(duration, latency time.Duration, folds int) {
-	if option.Config.MetricsConfig.TriggerPolicyUpdateCallDuration {
-		metrics.TriggerPolicyUpdateCallDuration.WithLabelValues("duration").Observe(duration.Seconds())
-		metrics.TriggerPolicyUpdateCallDuration.WithLabelValues("latency").Observe(latency.Seconds())
+	if p.LegacyMetics.TriggerPolicyUpdateCallDuration.IsEnabled() {
+		p.LegacyMetics.TriggerPolicyUpdateCallDuration.WithLabelValues("duration").Observe(duration.Seconds())
+		p.LegacyMetics.TriggerPolicyUpdateCallDuration.WithLabelValues("latency").Observe(latency.Seconds())
 	}
-	if option.Config.MetricsConfig.TriggerPolicyUpdateFolds {
-		metrics.TriggerPolicyUpdateFolds.Set(float64(folds))
+	if p.LegacyMetics.TriggerPolicyUpdateFolds.IsEnabled() {
+		p.LegacyMetics.TriggerPolicyUpdateFolds.Set(float64(folds))
 	}
 }

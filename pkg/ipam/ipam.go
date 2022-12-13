@@ -15,6 +15,7 @@ import (
 	"github.com/cilium/cilium/pkg/k8s/watchers/subscriber"
 	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
+	"github.com/cilium/cilium/pkg/metrics"
 )
 
 var (
@@ -103,7 +104,7 @@ type MtuConfiguration interface {
 }
 
 // NewIPAM returns a new IP address manager
-func NewIPAM(nodeAddressing types.NodeAddressing, c Configuration, owner Owner, k8sEventReg K8sEventRegister, mtuConfig MtuConfiguration, clientset client.Clientset) *IPAM {
+func NewIPAM(nodeAddressing types.NodeAddressing, c Configuration, owner Owner, k8sEventReg K8sEventRegister, mtuConfig MtuConfiguration, clientset client.Clientset, legacyMetrics *metrics.LegacyMetrics) *IPAM {
 	ipam := &IPAM{
 		nodeAddressing:   nodeAddressing,
 		config:           c,
@@ -112,6 +113,7 @@ func NewIPAM(nodeAddressing types.NodeAddressing, c Configuration, owner Owner, 
 		blacklist: IPBlacklist{
 			ips: map[string]string{},
 		},
+		legacyMetrics: legacyMetrics,
 	}
 
 	switch c.IPAMMode() {

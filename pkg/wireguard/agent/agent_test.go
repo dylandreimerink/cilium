@@ -16,6 +16,7 @@ import (
 	"github.com/cilium/cilium/pkg/cidr"
 	iputil "github.com/cilium/cilium/pkg/ip"
 	"github.com/cilium/cilium/pkg/ipcache"
+	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/source"
 )
 
@@ -83,7 +84,8 @@ func (a *AgentSuite) TestAgent_PeerConfig(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ipCache := ipcache.NewIPCache(&ipcache.Configuration{
-		Context: ctx,
+		Context:       ctx,
+		LegacyMetrics: metrics.NewLegacyMetrics(),
 	})
 	defer ipCache.Shutdown()
 	wgAgent := &Agent{

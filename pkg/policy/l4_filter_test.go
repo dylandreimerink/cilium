@@ -16,6 +16,7 @@ import (
 	"github.com/cilium/cilium/pkg/fqdn/re"
 	"github.com/cilium/cilium/pkg/identity/cache"
 	"github.com/cilium/cilium/pkg/labels"
+	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/policy/api"
 	"github.com/cilium/cilium/pkg/policy/api/kafka"
@@ -27,7 +28,7 @@ var (
 	toFoo        = &SearchContext{To: labels.ParseSelectLabelArray("foo")}
 
 	dummySelectorCacheUser = &DummySelectorCacheUser{}
-	c                      = cache.NewCachingIdentityAllocator(&testidentity.IdentityAllocatorOwnerMock{})
+	c                      = cache.NewCachingIdentityAllocator(&testidentity.IdentityAllocatorOwnerMock{}, metrics.NewLegacyMetrics())
 	testSelectorCache      = testNewSelectorCache(c.GetIdentityCache())
 
 	wildcardCachedSelector, _ = testSelectorCache.AddIdentitySelector(dummySelectorCacheUser, api.WildcardEndpointSelector)

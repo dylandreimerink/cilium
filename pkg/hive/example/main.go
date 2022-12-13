@@ -11,6 +11,7 @@ import (
 
 	"github.com/cilium/cilium/pkg/hive"
 	"github.com/cilium/cilium/pkg/hive/cell"
+	"github.com/cilium/cilium/pkg/metrics/metric"
 )
 
 // exampleCell is a module providing a configuration
@@ -25,6 +26,7 @@ var exampleCell = cell.Module(
 	"Example",
 
 	cell.Config(defaultExampleConfig),
+	cell.Metric(newExampleMetrics),
 	cell.Provide(newExampleObject),
 	cell.ProvidePrivate(newPrivateObject),
 )
@@ -163,4 +165,63 @@ func newExampleObject(lc hive.Lifecycle, cfg ExampleConfig, p *privateObject, lo
 	lc.Append(hive.Hook{OnStart: obj.onStart, OnStop: obj.onStop})
 	log.Info("ExampleObject constructed")
 	return obj
+}
+
+type exampleMetrics struct {
+	ExampleCounter    metric.Counter
+	ExampleCounterVec metric.Vec[metric.Counter]
+}
+
+func newExampleMetrics() exampleMetrics {
+	return exampleMetrics{
+		ExampleCounter: metric.NewCounter(metric.CounterOpts{
+			Namespace: "cilium",
+			Subsystem: metric.Subsystem{
+				Name:    "example",
+				DocName: "Example",
+			},
+			Name:             "misc_total",
+			Help:             "Counts miscellaneous events",
+			Description:      "Counts miscellaneous events, useful for nothing",
+			EnabledByDefault: true,
+			MetricType:       metric.MetricTypeEndpoint,
+			ConstLabels: metric.ConstLabels{
+				metric.ConstLabel{
+					Name:        "host",
+					Description: "Hostname",
+				}: "example.cluster-123.net",
+			},
+		}),
+		ExampleCounterVec: metric.NewCounterVec(
+			metric.CounterOpts{
+				Namespace: "cilium",
+				Subsystem: metric.Subsystem{
+					Name:    "example",
+					DocName: "Example",
+				},
+				Name:             "some_other_misc_total",
+				Help:             "Counts other types of miscellaneous events",
+				Description:      "Counts other types of miscellaneous events, useful for again, nothing",
+				EnabledByDefault: true,
+				MetricType:       metric.MetricTypeEndpoint,
+				ConstLabels: metric.ConstLabels{
+					metric.ConstLabel{
+						Name:        "host",
+						Description: "Hostname",
+					}: "example.cluster-123.net",
+				},
+			},
+			metric.LabelDescriptions{
+				metric.LabelDescription{
+					Name:        "state",
+					Description: "Count per state",
+					KnownValues: []metric.KnownValue{
+						{Name: "init"},
+						{Name: "ready"},
+						{Name: "error"},
+					},
+				},
+			},
+		),
+	}
 }

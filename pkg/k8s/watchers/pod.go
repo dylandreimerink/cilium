@@ -48,7 +48,6 @@ import (
 	"github.com/cilium/cilium/pkg/labelsfilter"
 	"github.com/cilium/cilium/pkg/loadbalancer"
 	"github.com/cilium/cilium/pkg/logging/logfields"
-	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/node"
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
 	"github.com/cilium/cilium/pkg/option"
@@ -80,14 +79,14 @@ func (k *K8sWatcher) createPodController(slimClient slimclientset.Interface, fie
 						epCreatedAt := ep.GetCreatedAt()
 						timeSinceEpCreated := time.Since(epCreatedAt)
 						if timeSinceEpCreated <= 0 {
-							metrics.EventLagK8s.Set(0)
+							k.legacyMetrics.EventLagK8s.Set(0)
 						} else {
-							metrics.EventLagK8s.Set(timeSinceEpCreated.Round(time.Second).Seconds())
+							k.legacyMetrics.EventLagK8s.Set(timeSinceEpCreated.Round(time.Second).Seconds())
 						}
 					} else {
 						// If the ep is nil then we reset to zero, otherwise
 						// the previous value set is kept forever.
-						metrics.EventLagK8s.Set(0)
+						k.legacyMetrics.EventLagK8s.Set(0)
 					}
 					err := k.addK8sPodV1(pod)
 					k.K8sEventProcessed(metricPod, resources.MetricCreate, err == nil)

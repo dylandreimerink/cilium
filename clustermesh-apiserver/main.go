@@ -53,6 +53,7 @@ import (
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
+	"github.com/cilium/cilium/pkg/metrics"
 	nodeStore "github.com/cilium/cilium/pkg/node/store"
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
 	"github.com/cilium/cilium/pkg/option"
@@ -133,6 +134,7 @@ func init() {
 		k8sClient.Cell,
 		resources,
 		healthAPIServerCell,
+		metrics.Cell,
 
 		cell.Invoke(registerHooks),
 	)
@@ -140,14 +142,14 @@ func init() {
 	vp = rootHive.Viper()
 }
 
-func registerHooks(lc hive.Lifecycle, clientset k8sClient.Clientset, services resource.Resource[*slim_corev1.Service]) error {
+func registerHooks(lc hive.Lifecycle, clientset k8sClient.Clientset, services resource.Resource[*slim_corev1.Service], legacyMetrics *metrics.LegacyMetrics) error {
 	if !clientset.IsEnabled() {
 		return errors.New("Kubernetes client not configured, cannot continue.")
 	}
 
 	lc.Append(hive.Hook{
 		OnStart: func(ctx hive.HookContext) error {
-			startServer(ctx, clientset, services)
+			startServer(ctx, clientset, services, legacyMetrics)
 			return nil
 		},
 	})
@@ -575,7 +577,7 @@ func synchronizeCiliumEndpoints(clientset k8sClient.Clientset) {
 	go ciliumEndpointsInformer.Run(wait.NeverStop)
 }
 
-func startServer(startCtx hive.HookContext, clientset k8sClient.Clientset, services resource.Resource[*slim_corev1.Service]) {
+func startServer(startCtx hive.HookContext, clientset k8sClient.Clientset, services resource.Resource[*slim_corev1.Service], legacyMetrics *metrics.LegacyMetrics) {
 	log.WithFields(logrus.Fields{
 		"cluster-name": cfg.clusterName,
 		"cluster-id":   clusterID,
@@ -585,7 +587,7 @@ func startServer(startCtx hive.HookContext, clientset k8sClient.Clientset, servi
 		synced.SyncCRDs(startCtx, clientset, synced.AllCRDResourceNames(), &synced.Resources{}, &synced.APIGroups{})
 	}
 
-	mgr := NewVMManager(clientset)
+	mgr := NewVMManager(clientset, legacyMetrics)
 
 	var err error
 	if err = kvstore.Setup(context.Background(), "etcd", option.Config.KVStoreOpt, nil); err != nil {

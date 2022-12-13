@@ -31,7 +31,6 @@ import (
 	"github.com/cilium/cilium/operator/pkg/lbipam"
 	operatorWatchers "github.com/cilium/cilium/operator/watchers"
 
-	"github.com/cilium/cilium/pkg/components"
 	"github.com/cilium/cilium/pkg/defaults"
 	"github.com/cilium/cilium/pkg/gops"
 	"github.com/cilium/cilium/pkg/hive"
@@ -93,6 +92,11 @@ var (
 		"operator",
 		"Cilium Operator",
 
+		cell.Invoke(func(metricHook *metrics.LoggingHook) {
+			// add hooks after setting up metrics
+			logging.DefaultLogger.Hooks.Add(metricHook)
+		}),
+
 		cell.Invoke(
 			registerOperatorHooks,
 		),
@@ -100,6 +104,8 @@ var (
 		cell.Provide(func() *option.DaemonConfig {
 			return option.Config
 		}),
+
+		metrics.Cell,
 
 		// These cells are started only after the operator is elected leader.
 		WithLeaderLifecycle(
@@ -180,9 +186,6 @@ func initEnv() {
 	option.Config.Populate(vp)
 	operatorOption.Config.Populate(vp)
 	operatorAddr = vp.GetString(operatorOption.OperatorAPIServeAddr)
-
-	// add hooks after setting up metrics in the option.Confog
-	logging.DefaultLogger.Hooks.Add(metrics.NewLoggingHook(components.CiliumOperatortName))
 
 	// Logging should always be bootstrapped first. Do not add any code above this!
 	if err := logging.SetupLogging(option.Config.LogDriver, logging.LogOptions(option.Config.LogOpt), binaryName, option.Config.Debug); err != nil {
@@ -372,13 +375,14 @@ func kvstoreEnabled() bool {
 
 var legacyCell = cell.Invoke(registerLegacyOnLeader)
 
-func registerLegacyOnLeader(lc hive.Lifecycle, clientset k8sClient.Clientset, resources SharedResources) {
+func registerLegacyOnLeader(lc hive.Lifecycle, clientset k8sClient.Clientset, resources SharedResources, legacyMetrics *metrics.LegacyMetrics) {
 	ctx, cancel := context.WithCancel(context.Background())
 	legacy := &legacyOnLeader{
-		ctx:       ctx,
-		cancel:    cancel,
-		clientset: clientset,
-		resources: resources,
+		ctx:           ctx,
+		cancel:        cancel,
+		clientset:     clientset,
+		resources:     resources,
+		legacyMetrics: legacyMetrics,
 	}
 	lc.Append(hive.Hook{
 		OnStart: legacy.onStart,
@@ -387,10 +391,11 @@ func registerLegacyOnLeader(lc hive.Lifecycle, clientset k8sClient.Clientset, re
 }
 
 type legacyOnLeader struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	clientset k8sClient.Clientset
-	resources SharedResources
+	ctx           context.Context
+	cancel        context.CancelFunc
+	clientset     k8sClient.Clientset
+	resources     SharedResources
+	legacyMetrics *metrics.LegacyMetrics
 }
 
 func (legacy *legacyOnLeader) onStop(_ hive.HookContext) error {

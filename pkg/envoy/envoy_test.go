@@ -19,6 +19,7 @@ import (
 	"github.com/cilium/cilium/pkg/envoy/xds"
 	"github.com/cilium/cilium/pkg/flowdebug"
 	"github.com/cilium/cilium/pkg/logging"
+	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/policy"
 	testipcache "github.com/cilium/cilium/pkg/testutils/ipcache"
@@ -67,7 +68,7 @@ func (s *EnvoySuite) TestEnvoy(c *C) {
 	StartAccessLogServer(stateLogDir, xdsServer)
 
 	// launch debug variant of the Envoy proxy
-	envoyProxy := StartEnvoy(stateLogDir, filepath.Join(stateLogDir, "cilium-envoy.log"), 0)
+	envoyProxy := StartEnvoy(metrics.NewLegacyMetrics(), stateLogDir, filepath.Join(stateLogDir, "cilium-envoy.log"), 0)
 	c.Assert(envoyProxy, NotNil)
 	log.Debug("started Envoy")
 
@@ -147,7 +148,7 @@ func (s *EnvoySuite) TestEnvoyNACK(c *C) {
 	StartAccessLogServer(stateLogDir, xdsServer)
 
 	// launch debug variant of the Envoy proxy
-	envoyProxy := StartEnvoy(stateLogDir, filepath.Join(stateLogDir, "cilium-envoy.log"), 42)
+	envoyProxy := StartEnvoy(metrics.NewLegacyMetrics(), stateLogDir, filepath.Join(stateLogDir, "cilium-envoy.log"), 42)
 	c.Assert(envoyProxy, NotNil)
 	log.Debug("started Envoy")
 

@@ -26,6 +26,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	k8s_metrics "k8s.io/client-go/tools/metrics"
 	"k8s.io/client-go/util/connrotation"
 
 	"github.com/cilium/cilium/pkg/controller"
@@ -43,6 +44,7 @@ import (
 	k8sversion "github.com/cilium/cilium/pkg/k8s/version"
 	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
+	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/version"
 )
 
@@ -106,7 +108,7 @@ type compositeClientset struct {
 	restConfig    *rest.Config
 }
 
-func newClientset(lc hive.Lifecycle, log logrus.FieldLogger, cfg Config) (Clientset, error) {
+func newClientset(lc hive.Lifecycle, log logrus.FieldLogger, cfg Config, legacyMetrics *metrics.LegacyMetrics) (Clientset, error) {
 	if !cfg.isEnabled() {
 		return &compositeClientset{disabled: true}, nil
 	}
@@ -170,6 +172,19 @@ func newClientset(lc hive.Lifecycle, log logrus.FieldLogger, cfg Config) (Client
 	if err != nil {
 		return nil, fmt.Errorf("unable to create cilium k8s client: %w", err)
 	}
+
+	// Link k8s client metrics to our own
+	k8s_metrics.Register(k8s_metrics.RegisterOpts{
+		ClientCertExpiry:      nil,
+		ClientCertRotationAge: nil,
+		RequestLatency: &k8sMetrics{
+			legacyMetrics: legacyMetrics,
+		},
+		RateLimiterLatency: nil,
+		RequestResult: &k8sMetrics{
+			legacyMetrics: legacyMetrics,
+		},
+	})
 
 	lc.Append(hive.Hook{
 		OnStart: client.onStart,
@@ -474,7 +489,7 @@ func NewStandaloneClientset(cfg Config) (Clientset, error) {
 	log := logging.DefaultLogger
 	lc := &standaloneLifecycle{}
 
-	clientset, err := newClientset(lc, log, cfg)
+	clientset, err := newClientset(lc, log, cfg, metrics.NewLegacyMetrics())
 	if err != nil {
 		return nil, err
 	}

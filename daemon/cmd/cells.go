@@ -5,10 +5,13 @@ package cmd
 
 import (
 	"github.com/cilium/cilium/pkg/bgpv1"
+	"github.com/cilium/cilium/pkg/datapath/linux/ipsec"
 	"github.com/cilium/cilium/pkg/defaults"
 	"github.com/cilium/cilium/pkg/gops"
 	"github.com/cilium/cilium/pkg/hive/cell"
 	k8sClient "github.com/cilium/cilium/pkg/k8s/client"
+	"github.com/cilium/cilium/pkg/logging"
+	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/option"
 )
@@ -38,6 +41,14 @@ var (
 
 		// Provide option.Config via hive so cells can depend on the agent config.
 		cell.Provide(func() *option.DaemonConfig { return option.Config }),
+
+		// Provides metrics registry and prometheus HTTP endpoint.
+		metrics.Cell,
+
+		cell.Invoke(func(loggingHook *metrics.LoggingHook) {
+			// add hooks after setting up metrics in the option.Config
+			logging.DefaultLogger.Hooks.Add(loggingHook)
+		}),
 	)
 
 	// ControlPlane implement the per-node control functions. These are pure
@@ -52,6 +63,9 @@ var (
 		// observing changes to it.
 		node.LocalNodeStoreCell,
 
+		// Metrics for the API rate limiter
+		cell.Metric(newApiRateLimitingMetrics),
+
 		// daemonCell wraps the legacy daemon initialization and provides Promise[*Daemon].
 		daemonCell,
 
@@ -64,6 +78,8 @@ var (
 	Datapath = cell.Module(
 		"datapath",
 		"Datapath",
+
+		cell.Metric(ipsec.NewXFRMCollector),
 
 		cell.Provide(
 			newWireguardAgent,

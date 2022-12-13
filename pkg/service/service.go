@@ -33,12 +33,6 @@ import (
 
 const anyPort = "*"
 
-var (
-	updateMetric = metrics.ServicesCount.WithLabelValues("update")
-	deleteMetric = metrics.ServicesCount.WithLabelValues("delete")
-	addMetric    = metrics.ServicesCount.WithLabelValues("add")
-)
-
 // ErrLocalRedirectServiceExists represents an error when a Local redirect
 // service exists with the same Frontend.
 type ErrLocalRedirectServiceExists struct {
@@ -222,10 +216,17 @@ type Service struct {
 	lastUpdatedTs atomic.Value
 
 	l7lbSvcs map[lb.ServiceName]*L7LBInfo
+
+	legacyMetrics *metrics.LegacyMetrics
 }
 
 // NewService creates a new instance of the service handler.
-func NewService(monitorNotify monitorNotify, envoyCache envoyCache, lbmap datapathTypes.LBMap) *Service {
+func NewService(
+	monitorNotify monitorNotify,
+	envoyCache envoyCache,
+	lbmap datapathTypes.LBMap,
+	legacyMetrics *metrics.LegacyMetrics,
+) *Service {
 
 	var localHealthServer healthServer
 	if option.Config.EnableHealthCheckNodePort {
@@ -242,6 +243,7 @@ func NewService(monitorNotify monitorNotify, envoyCache envoyCache, lbmap datapa
 		healthServer:    localHealthServer,
 		lbmap:           lbmap,
 		l7lbSvcs:        map[lb.ServiceName]*L7LBInfo{},
+		legacyMetrics:   legacyMetrics,
 	}
 	svc.lastUpdatedTs.Store(time.Now())
 
@@ -681,9 +683,9 @@ func (s *Service) upsertService(params *lb.SVC) (bool, lb.ID, error) {
 	}
 
 	if new {
-		addMetric.Inc()
+		s.legacyMetrics.ServicesCount.WithLabelValues("add").Inc()
 	} else {
-		updateMetric.Inc()
+		s.legacyMetrics.ServicesCount.WithLabelValues("update").Inc()
 	}
 
 	s.notifyMonitorServiceUpsert(svc.frontend, svc.backends,
@@ -1489,7 +1491,7 @@ func (s *Service) deleteServiceLocked(svc *svcInfo) error {
 		s.healthServer.DeleteService(lb.ID(svc.frontend.ID))
 	}
 
-	deleteMetric.Inc()
+	s.legacyMetrics.ServicesCount.WithLabelValues("delete").Inc()
 	s.notifyMonitorServiceDelete(svc.frontend.ID)
 
 	return nil

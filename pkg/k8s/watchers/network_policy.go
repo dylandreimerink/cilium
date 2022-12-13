@@ -86,7 +86,7 @@ func (k *K8sWatcher) addK8sNetworkPolicyV1(k8sNP *slim_networkingv1.NetworkPolic
 	}
 	scopedLog = scopedLog.WithField(logfields.K8sNetworkPolicyName, k8sNP.ObjectMeta.Name)
 
-	opts := policy.AddOptions{Replace: true, Source: metrics.LabelEventSourceK8s}
+	opts := policy.AddOptions{Replace: true, Source: metrics.LabelEventSourceK8s.Name}
 	if _, err := k.policyManager.PolicyAdd(rules, &opts); err != nil {
 		metrics.PolicyImportErrorsTotal.Inc()
 		scopedLog.WithError(err).WithFields(logrus.Fields{

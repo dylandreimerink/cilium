@@ -8,12 +8,11 @@ import (
 	"time"
 
 	"github.com/go-openapi/runtime/middleware"
-	"github.com/prometheus/client_golang/prometheus"
 
 	restapi "github.com/cilium/cilium/api/v1/server/restapi/metrics"
 	"github.com/cilium/cilium/pkg/api"
 	"github.com/cilium/cilium/pkg/metrics"
-	"github.com/cilium/cilium/pkg/option"
+	"github.com/cilium/cilium/pkg/metrics/metric"
 	"github.com/cilium/cilium/pkg/spanstat"
 )
 
@@ -27,7 +26,7 @@ func NewGetMetricsHandler(d *Daemon) restapi.GetMetricsHandler {
 }
 
 func (h *getMetrics) Handle(params restapi.GetMetricsParams) middleware.Responder {
-	metrics, err := metrics.DumpMetrics()
+	metrics, err := h.daemon.metricsRegistry.DumpMetrics()
 	if err != nil {
 		return api.Error(
 			restapi.GetMetricsInternalServerErrorCode,
@@ -37,20 +36,22 @@ func (h *getMetrics) Handle(params restapi.GetMetricsParams) middleware.Responde
 	return restapi.NewGetMetricsOK().WithPayload(metrics)
 }
 
-func initMetrics() <-chan error {
-	var errs <-chan error
+// These spans need to start recording before hive has been invoked, these globals will be assigned to the
+// hive initialized BootstrapMetrics as soon as its available.
+var (
+	overallBootstrap   spanstat.SpanStat
+	earlyInitBootstrap spanstat.SpanStat
+)
 
-	if option.Config.PrometheusServeAddr != "" {
-		log.Infof("Serving prometheus metrics on %s", option.Config.PrometheusServeAddr)
-		errs = metrics.Enable(option.Config.PrometheusServeAddr)
-	}
-
-	return errs
+type BootstrapMetrics struct {
+	BootstrapTimes metric.Vec[metric.Observer]
 }
 
-type bootstrapStatistics struct {
-	overall         spanstat.SpanStat
-	earlyInit       spanstat.SpanStat
+type BootstrapTimes struct {
+	bootstrapMetrics *BootstrapMetrics
+
+	overall         *spanstat.SpanStat
+	earlyInit       *spanstat.SpanStat
 	k8sInit         spanstat.SpanStat
 	restore         spanstat.SpanStat
 	healthCheck     spanstat.SpanStat
@@ -70,54 +71,58 @@ type bootstrapStatistics struct {
 	kvstore         spanstat.SpanStat
 }
 
-func (b *bootstrapStatistics) updateMetrics() {
-	for scope, stat := range b.getMap() {
+func NewBootstrapMetrics() *BootstrapMetrics {
+	return &BootstrapMetrics{
+		BootstrapTimes: metric.NewHistogramVec(metric.HistogramOpts{
+			Namespace:        metrics.Namespace,
+			Subsystem:        metrics.SubsystemAgent,
+			Name:             "bootstrap_seconds",
+			Help:             "Duration of bootstrap sequence",
+			EnabledByDefault: true,
+		}, []metric.LabelDescription{metrics.LabelScope, metrics.LabelOutcome}),
+	}
+}
+
+func NewBootstrapTimes(metrics *BootstrapMetrics) *BootstrapTimes {
+	return &BootstrapTimes{
+		bootstrapMetrics: metrics,
+		// This timespan will have been started before this constructor is called, adopt it now.
+		overall:   &overallBootstrap,
+		earlyInit: &earlyInitBootstrap,
+	}
+}
+
+func (bm *BootstrapTimes) updateMetrics() {
+	for scope, stat := range bm.getMap() {
 		if stat.SuccessTotal() != time.Duration(0) {
-			metricBootstrapTimes.WithLabelValues(scope, metrics.LabelValueOutcomeSuccess).Observe(stat.SuccessTotal().Seconds())
+			bm.bootstrapMetrics.BootstrapTimes.WithLabelValues(scope, metrics.LabelValueOutcomeSuccess.Name).Observe(stat.SuccessTotal().Seconds())
 		}
 		if stat.FailureTotal() != time.Duration(0) {
-			metricBootstrapTimes.WithLabelValues(scope, metrics.LabelValueOutcomeFail).Observe(stat.FailureTotal().Seconds())
+			bm.bootstrapMetrics.BootstrapTimes.WithLabelValues(scope, metrics.LabelValueOutcomeFail.Name).Observe(stat.FailureTotal().Seconds())
 		}
 	}
 }
 
-func (b *bootstrapStatistics) getMap() map[string]*spanstat.SpanStat {
+func (bm *BootstrapTimes) getMap() map[string]*spanstat.SpanStat {
 	return map[string]*spanstat.SpanStat{
-		"overall":         &b.overall,
-		"earlyInit":       &b.earlyInit,
-		"k8sInit":         &b.k8sInit,
-		"restore":         &b.restore,
-		"healthCheck":     &b.healthCheck,
-		"ingressIPAM":     &b.ingressIPAM,
-		"initAPI":         &b.initAPI,
-		"initDaemon":      &b.initDaemon,
-		"cleanup":         &b.cleanup,
-		"bpfBase":         &b.bpfBase,
-		"clusterMeshInit": &b.clusterMeshInit,
-		"ipam":            &b.ipam,
-		"daemonInit":      &b.daemonInit,
-		"mapsInit":        &b.mapsInit,
-		"workloadsInit":   &b.workloadsInit,
-		"proxyStart":      &b.proxyStart,
-		"fqdn":            &b.fqdn,
-		"enableConntrack": &b.enableConntrack,
-		"kvstore":         &b.kvstore,
-	}
-}
-
-var (
-	metricBootstrapTimes prometheus.ObserverVec
-)
-
-func registerBootstrapMetrics() {
-	metricBootstrapTimes = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Namespace: metrics.Namespace,
-		Subsystem: metrics.SubsystemAgent,
-		Name:      "bootstrap_seconds",
-		Help:      "Duration of bootstrap sequence",
-	}, []string{metrics.LabelScope, metrics.LabelOutcome})
-
-	if err := metrics.Register(metricBootstrapTimes); err != nil {
-		log.WithError(err).Fatal("unable to register prometheus metric")
+		"overall":         bm.overall,
+		"earlyInit":       bm.earlyInit,
+		"k8sInit":         &bm.k8sInit,
+		"restore":         &bm.restore,
+		"healthCheck":     &bm.healthCheck,
+		"ingressIPAM":     &bm.ingressIPAM,
+		"initAPI":         &bm.initAPI,
+		"initDaemon":      &bm.initDaemon,
+		"cleanup":         &bm.cleanup,
+		"bpfBase":         &bm.bpfBase,
+		"clusterMeshInit": &bm.clusterMeshInit,
+		"ipam":            &bm.ipam,
+		"daemonInit":      &bm.daemonInit,
+		"mapsInit":        &bm.mapsInit,
+		"workloadsInit":   &bm.workloadsInit,
+		"proxyStart":      &bm.proxyStart,
+		"fqdn":            &bm.fqdn,
+		"enableConntrack": &bm.enableConntrack,
+		"kvstore":         &bm.kvstore,
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/cilium/cilium/pkg/cidr"
 	"github.com/cilium/cilium/pkg/datapath/types"
 	"github.com/cilium/cilium/pkg/lock"
+	"github.com/cilium/cilium/pkg/metrics"
 )
 
 // AllocationResult is the result of an allocation
@@ -101,6 +102,8 @@ type IPAM struct {
 	allocatorMutex lock.RWMutex
 
 	blacklist IPBlacklist
+
+	legacyMetrics *metrics.LegacyMetrics
 }
 
 // DebugStatus implements debug.StatusObject to provide debug status collection

@@ -130,8 +130,8 @@ func (rc *remoteCluster) releaseOldConnection() {
 
 	rc.config = nil
 
-	rc.mesh.metricTotalNodes.WithLabelValues(rc.mesh.conf.Name, rc.mesh.conf.NodeName, rc.name).Set(0.0)
-	rc.mesh.metricReadinessStatus.WithLabelValues(rc.mesh.conf.Name, rc.mesh.conf.NodeName, rc.name).Set(metrics.BoolToFloat64(rc.isReadyLocked()))
+	rc.mesh.conf.LegacyMetrics.TotalNodes.WithLabelValues(rc.mesh.conf.Name, rc.mesh.conf.NodeName, rc.name).Set(0.0)
+	rc.mesh.conf.LegacyMetrics.ReadinessStatus.WithLabelValues(rc.mesh.conf.Name, rc.mesh.conf.NodeName, rc.name).Set(metrics.BoolToFloat64(rc.isReadyLocked()))
 
 	rc.mutex.Unlock()
 
@@ -251,8 +251,8 @@ func (rc *remoteCluster) restartRemoteConnection(allocator RemoteIdentityWatcher
 				rc.config = config
 				rc.ipCacheWatcher = ipCacheWatcher
 				rc.remoteIdentityCache = remoteIdentityCache
-				rc.mesh.metricTotalNodes.WithLabelValues(rc.mesh.conf.Name, rc.mesh.conf.NodeName, rc.name).Set(float64(rc.remoteNodes.NumEntries()))
-				rc.mesh.metricReadinessStatus.WithLabelValues(rc.mesh.conf.Name, rc.mesh.conf.NodeName, rc.name).Set(metrics.BoolToFloat64(rc.isReadyLocked()))
+				rc.mesh.conf.LegacyMetrics.TotalNodes.WithLabelValues(rc.mesh.conf.Name, rc.mesh.conf.NodeName, rc.name).Set(float64(rc.remoteNodes.NumEntries()))
+				rc.mesh.conf.LegacyMetrics.ReadinessStatus.WithLabelValues(rc.mesh.conf.Name, rc.mesh.conf.NodeName, rc.name).Set(metrics.BoolToFloat64(rc.isReadyLocked()))
 				rc.mutex.Unlock()
 
 				rc.getLogger().Info("Established connection to remote etcd")
@@ -261,8 +261,8 @@ func (rc *remoteCluster) restartRemoteConnection(allocator RemoteIdentityWatcher
 			},
 			StopFunc: func(ctx context.Context) error {
 				rc.releaseOldConnection()
-				rc.mesh.metricTotalNodes.WithLabelValues(rc.mesh.conf.Name, rc.mesh.conf.NodeName, rc.name).Set(float64(rc.remoteNodes.NumEntries()))
-				rc.mesh.metricReadinessStatus.WithLabelValues(rc.mesh.conf.Name, rc.mesh.conf.NodeName, rc.name).Set(metrics.BoolToFloat64(rc.isReadyLocked()))
+				rc.mesh.conf.LegacyMetrics.TotalNodes.WithLabelValues(rc.mesh.conf.Name, rc.mesh.conf.NodeName, rc.name).Set(float64(rc.remoteNodes.NumEntries()))
+				rc.mesh.conf.LegacyMetrics.ReadinessStatus.WithLabelValues(rc.mesh.conf.Name, rc.mesh.conf.NodeName, rc.name).Set(metrics.BoolToFloat64(rc.isReadyLocked()))
 				rc.getLogger().Info("All resources of remote cluster cleaned up")
 				return nil
 			},
@@ -320,10 +320,10 @@ func (rc *remoteCluster) onInsert(allocator RemoteIdentityWatcher) {
 				rc.mutex.Lock()
 				rc.failures++
 				rc.lastFailure = time.Now()
-				rc.mesh.metricLastFailureTimestamp.WithLabelValues(rc.mesh.conf.Name, rc.mesh.conf.NodeName, rc.name).SetToCurrentTime()
-				rc.mesh.metricTotalFailures.WithLabelValues(rc.mesh.conf.Name, rc.mesh.conf.NodeName, rc.name).Set(float64(rc.failures))
-				rc.mesh.metricTotalNodes.WithLabelValues(rc.mesh.conf.Name, rc.mesh.conf.NodeName, rc.name).Set(float64(rc.remoteNodes.NumEntries()))
-				rc.mesh.metricReadinessStatus.WithLabelValues(rc.mesh.conf.Name, rc.mesh.conf.NodeName, rc.name).Set(metrics.BoolToFloat64(rc.isReadyLocked()))
+				rc.mesh.conf.LegacyMetrics.LastFailureTimestamp.WithLabelValues(rc.mesh.conf.Name, rc.mesh.conf.NodeName, rc.name).SetToCurrentTime()
+				rc.mesh.conf.LegacyMetrics.TotalFailures.WithLabelValues(rc.mesh.conf.Name, rc.mesh.conf.NodeName, rc.name).Set(float64(rc.failures))
+				rc.mesh.conf.LegacyMetrics.TotalNodes.WithLabelValues(rc.mesh.conf.Name, rc.mesh.conf.NodeName, rc.name).Set(float64(rc.remoteNodes.NumEntries()))
+				rc.mesh.conf.LegacyMetrics.ReadinessStatus.WithLabelValues(rc.mesh.conf.Name, rc.mesh.conf.NodeName, rc.name).Set(metrics.BoolToFloat64(rc.isReadyLocked()))
 				rc.mutex.Unlock()
 				rc.restartRemoteConnection(allocator)
 			}

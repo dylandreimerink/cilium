@@ -30,7 +30,6 @@ import (
 	"github.com/cilium/cilium/pkg/bpf"
 	"github.com/cilium/cilium/pkg/cgroups"
 	"github.com/cilium/cilium/pkg/common"
-	"github.com/cilium/cilium/pkg/components"
 	"github.com/cilium/cilium/pkg/controller"
 	"github.com/cilium/cilium/pkg/datapath"
 	"github.com/cilium/cilium/pkg/datapath/iptables"
@@ -106,7 +105,6 @@ var (
 	log = logging.DefaultLogger.WithField(logfields.LogSubsys, daemonSubsys)
 
 	bootstrapTimestamp = time.Now()
-	bootstrapStats     = bootstrapStatistics{}
 )
 
 func initializeFlags() {
@@ -686,9 +684,6 @@ func initializeFlags() {
 	flags.MarkHidden(option.MaxCtrlIntervalName)
 	option.BindEnv(Vp, option.MaxCtrlIntervalName)
 
-	flags.StringSlice(option.Metrics, []string{}, "Metrics that should be enabled or disabled from the default metric list. (+metric_foo to enable metric_foo , -metric_bar to disable metric_bar)")
-	option.BindEnv(Vp, option.Metrics)
-
 	flags.Bool(option.EnableMonitorName, true, "Enable the monitor unix domain socket server")
 	option.BindEnv(Vp, option.EnableMonitorName)
 
@@ -760,14 +755,6 @@ func initializeFlags() {
 
 	flags.Bool(option.PreAllocateMapsName, defaults.PreAllocateMaps, "Enable BPF map pre-allocation")
 	option.BindEnv(Vp, option.PreAllocateMapsName)
-
-	// We expect only one of the possible variables to be filled. The evaluation order is:
-	// --prometheus-serve-addr, CILIUM_PROMETHEUS_SERVE_ADDR, then PROMETHEUS_SERVE_ADDR
-	// The second environment variable (without the CILIUM_ prefix) is here to
-	// handle the case where someone uses a new image with an older spec, and the
-	// older spec used the older variable name.
-	flags.String(option.PrometheusServeAddr, ":9962", "IP:Port on which to serve prometheus metrics (pass \":Port\" to bind on all interfaces, \"\" is off)")
-	option.BindEnvWithLegacyEnvFallback(Vp, option.PrometheusServeAddr, "PROMETHEUS_SERVE_ADDR")
 
 	flags.Int(option.CTMapEntriesGlobalTCPName, option.CTMapEntriesGlobalTCPDefault, "Maximum number of entries in TCP CT table")
 	option.BindEnvWithLegacyEnvFallback(Vp, option.CTMapEntriesGlobalTCPName, "CILIUM_GLOBAL_CT_MAX_TCP")
@@ -1104,9 +1091,6 @@ func restoreExecPermissions(searchDir string, patterns ...string) error {
 }
 
 func initLogging() {
-	// add hooks after setting up metrics in the option.Config
-	logging.DefaultLogger.Hooks.Add(metrics.NewLoggingHook(components.CiliumAgentName))
-
 	// Logging should always be bootstrapped first. Do not add any code above this!
 	if err := logging.SetupLogging(option.Config.LogDriver, logging.LogOptions(option.Config.LogOpt), "cilium-agent", option.Config.Debug); err != nil {
 		log.Fatal(err)
@@ -1126,8 +1110,8 @@ func initDaemonConfig() {
 }
 
 func initEnv() {
-	bootstrapStats.earlyInit.Start()
-	defer bootstrapStats.earlyInit.End(true)
+	earlyInitBootstrap.Start()
+	defer earlyInitBootstrap.End(true)
 
 	var debugDatapath bool
 
@@ -1595,7 +1579,7 @@ func newWireguardAgent(lc hive.Lifecycle) *wg.Agent {
 	return wgAgent
 }
 
-func newDatapath(lc hive.Lifecycle, wgAgent *wireguard.Agent) datapath.Datapath {
+func newDatapath(lc hive.Lifecycle, wgAgent *wireguard.Agent, xfrmColl ipsec.XfrmCollectorMetric) datapath.Datapath {
 	datapathConfig := linuxdatapath.DatapathConfiguration{
 		HostDevice: defaults.HostDevice,
 		ProcFs:     option.Config.ProcFs,
@@ -1613,7 +1597,7 @@ func newDatapath(lc hive.Lifecycle, wgAgent *wireguard.Agent) datapath.Datapath 
 			return nil
 		}})
 
-	return linuxdatapath.NewDatapath(datapathConfig, iptablesManager, wgAgent)
+	return linuxdatapath.NewDatapath(datapathConfig, iptablesManager, wgAgent, xfrmColl.XfrmCollector)
 }
 
 // daemonCell wraps the existing implementation of the cilium-agent that has
@@ -1625,18 +1609,25 @@ var daemonCell = cell.Module(
 
 	cell.Provide(newDaemonPromise),
 	cell.Invoke(func(promise.Promise[*Daemon]) {}), // Force instantiation.
+
+	cell.Provide(NewBootstrapTimes),
+	cell.Metric(NewBootstrapMetrics),
 )
 
 type daemonParams struct {
 	cell.In
 
-	Lifecycle      hive.Lifecycle
-	Clientset      k8sClient.Clientset
-	Datapath       datapath.Datapath
-	WGAgent        *wg.Agent `optional:"true"`
-	LocalNodeStore node.LocalNodeStore
-	BGPController  *bgpv1.Controller
-	Shutdowner     hive.Shutdowner
+	Lifecycle              hive.Lifecycle
+	Clientset              k8sClient.Clientset
+	Datapath               datapath.Datapath
+	WGAgent                *wg.Agent `optional:"true"`
+	LocalNodeStore         node.LocalNodeStore
+	BGPController          *bgpv1.Controller
+	Shutdowner             hive.Shutdowner
+	LegacyMetrics          *metrics.LegacyMetrics
+	MetricsRegistry        *metrics.Registry
+	BootstrapStats         *BootstrapTimes
+	APIRateLimitingMetrics *apiRateLimitingMetrics
 }
 
 func newDaemonPromise(params daemonParams) promise.Promise[*Daemon] {
@@ -1660,10 +1651,14 @@ func newDaemonPromise(params daemonParams) promise.Promise[*Daemon] {
 		OnStart: func(hive.HookContext) error {
 			d, restoredEndpoints, err := newDaemon(
 				daemonCtx, cleaner,
-				WithDefaultEndpointManager(daemonCtx, params.Clientset, endpoint.CheckHealth),
+				WithDefaultEndpointManager(daemonCtx, params.Clientset, endpoint.CheckHealth, params.LegacyMetrics),
 				params.Datapath,
 				params.WGAgent,
-				params.Clientset)
+				params.Clientset,
+				params.MetricsRegistry,
+				params.LegacyMetrics,
+				params.BootstrapStats,
+				params.APIRateLimitingMetrics)
 			if err != nil {
 				return fmt.Errorf("daemon creation failed: %w", err)
 			}
@@ -1703,20 +1698,20 @@ func runDaemon(d *Daemon, restoredEndpoints *endpointRestoreState, cleaner *daem
 		log.Fatalf("postinit failed: %s", err)
 	}
 
-	bootstrapStats.enableConntrack.Start()
+	params.BootstrapStats.enableConntrack.Start()
 	log.Info("Starting connection tracking garbage collector")
 	gc.Enable(option.Config.EnableIPv4, option.Config.EnableIPv6,
 		restoredEndpoints.restored, d.endpointManager,
 		d.datapath.LocalNodeAddressing())
-	bootstrapStats.enableConntrack.End(true)
+	params.BootstrapStats.enableConntrack.End(true)
 
-	bootstrapStats.k8sInit.Start()
+	params.BootstrapStats.k8sInit.Start()
 	if params.Clientset.IsEnabled() {
 		// Wait only for certain caches, but not all!
 		// (Check Daemon.InitK8sSubsystem() for more info)
 		<-d.k8sCachesSynced
 	}
-	bootstrapStats.k8sInit.End(true)
+	params.BootstrapStats.k8sInit.End(true)
 	restoreComplete := d.initRestore(restoredEndpoints)
 
 	if params.WGAgent != nil {
@@ -1819,21 +1814,13 @@ func runDaemon(d *Daemon, restoredEndpoints *endpointRestoreState, cleaner *daem
 		}
 	}
 
-	bootstrapStats.healthCheck.Start()
+	params.BootstrapStats.healthCheck.Start()
 	if option.Config.EnableHealthChecking {
-		d.initHealth(cleaner)
+		d.initHealth(cleaner, params.LegacyMetrics)
 	}
-	bootstrapStats.healthCheck.End(true)
+	params.BootstrapStats.healthCheck.End(true)
 
 	d.startStatusCollector(cleaner)
-
-	go func(errs <-chan error) {
-		err := <-errs
-		if err != nil {
-			log.WithError(err).Error("Cannot start metrics server")
-			params.Shutdowner.Shutdown(hive.ShutdownWithError(err))
-		}
-	}(initMetrics())
 
 	d.startAgentHealthHTTPService()
 	if option.Config.KubeProxyReplacementHealthzBindAddr != "" {
@@ -1842,8 +1829,8 @@ func runDaemon(d *Daemon, restoredEndpoints *endpointRestoreState, cleaner *daem
 		}
 	}
 
-	bootstrapStats.initAPI.Start()
-	srv := server.NewServer(d.instantiateAPI())
+	params.BootstrapStats.initAPI.Start()
+	srv := server.NewServer(d.instantiateAPI(), params.LegacyMetrics)
 	srv.EnabledListeners = []string{"unix"}
 	srv.SocketPath = option.Config.SocketPath
 	srv.ReadTimeout = apiTimeout
@@ -1851,7 +1838,7 @@ func runDaemon(d *Daemon, restoredEndpoints *endpointRestoreState, cleaner *daem
 	cleaner.cleanupFuncs.Add(func() { srv.Shutdown() })
 
 	srv.ConfigureAPI()
-	bootstrapStats.initAPI.End(true)
+	params.BootstrapStats.initAPI.End(true)
 
 	err := d.SendNotification(monitorAPI.StartMessage(time.Now()))
 	if err != nil {
@@ -1882,8 +1869,8 @@ func runDaemon(d *Daemon, restoredEndpoints *endpointRestoreState, cleaner *daem
 
 	d.startCNIConfWriter(option.Config, cleaner)
 
-	bootstrapStats.overall.End(true)
-	bootstrapStats.updateMetrics()
+	params.BootstrapStats.overall.End(true)
+	params.BootstrapStats.updateMetrics()
 	go d.launchHubble()
 
 	err = option.Config.StoreInFile(option.Config.StateDir)

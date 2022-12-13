@@ -132,6 +132,8 @@ type Repository struct {
 	certManager CertificateManager
 
 	getEnvoyHTTPRules func(CertificateManager, *api.L7Rules, string) (*cilium.HttpNetworkPolicyRules, bool)
+
+	legacyMetrics *metrics.LegacyMetrics
 }
 
 // GetSelectorCache() returns the selector cache used by the Repository
@@ -156,7 +158,7 @@ func (p *Repository) GetPolicyCache() *PolicyCache {
 }
 
 // NewPolicyRepository creates a new policy repository.
-func NewPolicyRepository(idAllocator cache.IdentityAllocator, idCache cache.IdentityCache, certManager CertificateManager) *Repository {
+func NewPolicyRepository(idAllocator cache.IdentityAllocator, idCache cache.IdentityCache, certManager CertificateManager, legacyMetrics *metrics.LegacyMetrics) *Repository {
 	repoChangeQueue := eventqueue.NewEventQueueBuffered("repository-change-queue", option.Config.PolicyQueueSize)
 	ruleReactionQueue := eventqueue.NewEventQueueBuffered("repository-reaction-queue", option.Config.PolicyQueueSize)
 	repoChangeQueue.Run()
@@ -169,6 +171,7 @@ func NewPolicyRepository(idAllocator cache.IdentityAllocator, idCache cache.Iden
 		RuleReactionQueue:     ruleReactionQueue,
 		selectorCache:         selectorCache,
 		certManager:           certManager,
+		legacyMetrics:         legacyMetrics,
 	}
 	repo.policyCache = NewPolicyCache(repo, true)
 	return repo
@@ -373,7 +376,7 @@ func (p *Repository) AddListLocked(rules api.Rules) (ruleSlice, uint64) {
 
 	p.rules = append(p.rules, newList...)
 	p.BumpRevision()
-	metrics.Policy.Add(float64(len(newList)))
+	p.legacyMetrics.Policy.Add(float64(len(newList)))
 	return newList, p.GetRevision()
 }
 
@@ -479,7 +482,7 @@ func (p *Repository) DeleteByLabelsLocked(lbls labels.LabelArray) (ruleSlice, ui
 	if deleted > 0 {
 		p.BumpRevision()
 		p.rules = new
-		metrics.Policy.Sub(float64(deleted))
+		p.legacyMetrics.Policy.Sub(float64(deleted))
 	}
 
 	return deletedRules, p.GetRevision(), deleted
@@ -636,7 +639,7 @@ func (p *Repository) TranslateRules(translator Translator) (*TranslationResult, 
 
 // BumpRevision allows forcing policy regeneration
 func (p *Repository) BumpRevision() {
-	metrics.PolicyRevision.Inc()
+	p.legacyMetrics.PolicyRevision.Inc()
 	atomic.AddUint64(&p.revision, 1)
 }
 

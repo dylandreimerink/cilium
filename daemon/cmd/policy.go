@@ -44,10 +44,12 @@ func (d *Daemon) initPolicy(epMgr *endpointmanager.EndpointManager) error {
 	// this is only triggered by agent configuration changes for now and
 	// should be counted in pol.TriggerMetrics.
 	rt, err := trigger.NewTrigger(trigger.Parameters{
-		Name:            "datapath-regeneration",
-		MetricsObserver: &policy.TriggerMetrics{},
-		MinInterval:     option.Config.PolicyTriggerInterval,
-		TriggerFunc:     d.datapathRegen,
+		Name: "datapath-regeneration",
+		MetricsObserver: &policy.TriggerMetrics{
+			LegacyMetics: d.legacyMetrics,
+		},
+		MinInterval: option.Config.PolicyTriggerInterval,
+		TriggerFunc: d.datapathRegen,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create datapath regeneration trigger: %w", err)
@@ -56,9 +58,9 @@ func (d *Daemon) initPolicy(epMgr *endpointmanager.EndpointManager) error {
 
 	d.policy = policy.NewPolicyRepository(d.identityAllocator,
 		d.identityAllocator.GetIdentityCache(),
-		certificatemanager.NewManager(option.Config.CertDirectory, d.clientset))
+		certificatemanager.NewManager(option.Config.CertDirectory, d.clientset), d.legacyMetrics)
 	d.policy.SetEnvoyRulesFunc(envoy.GetEnvoyHTTPRules)
-	d.policyUpdater, err = policy.NewUpdater(d.policy, epMgr)
+	d.policyUpdater, err = policy.NewUpdater(d.policy, epMgr, d.legacyMetrics)
 	if err != nil {
 		return fmt.Errorf("failed to create policy update trigger: %w", err)
 	}
@@ -376,7 +378,7 @@ func (d *Daemon) policyAdd(sourceRules policyAPI.Rules, opts *policy.AddOptions,
 	}
 	d.endpointManager.CallbackForEndpointsAtPolicyRev(d.ctx, newRev, func(now time.Time) {
 		duration, _ := safetime.TimeSinceSafe(policyAddStartTime, logger)
-		metrics.PolicyImplementationDelay.WithLabelValues(source).Observe(duration.Seconds())
+		d.legacyMetrics.PolicyImplementationDelay.WithLabelValues(source).Observe(duration.Seconds())
 	})
 
 	// remove prefixes of replaced rules above. Refcounts have been incremented
@@ -692,7 +694,7 @@ func (h *putPolicy) Handle(params PutPolicyParams) middleware.Responder {
 		}
 	}
 
-	rev, err := d.PolicyAdd(rules, &policy.AddOptions{Source: metrics.LabelEventSourceAPI})
+	rev, err := d.PolicyAdd(rules, &policy.AddOptions{Source: metrics.LabelEventSourceAPI.Name})
 	if err != nil {
 		metrics.PolicyImportErrorsTotal.Inc()
 		return api.Error(PutPolicyFailureCode, err)

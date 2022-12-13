@@ -14,6 +14,7 @@ import (
 	fakeDatapath "github.com/cilium/cilium/pkg/datapath/fake"
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/loadbalancer"
+	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/policy"
 	"github.com/cilium/cilium/pkg/policy/api"
 	testidentity "github.com/cilium/cilium/pkg/testutils/identity"
@@ -21,7 +22,7 @@ import (
 
 func (s *K8sSuite) TestTranslatorDirect(c *C) {
 	idAllocator := testidentity.NewMockIdentityAllocator(nil)
-	repo := policy.NewPolicyRepository(idAllocator, nil, nil)
+	repo := policy.NewPolicyRepository(idAllocator, nil, nil, metrics.NewLegacyMetrics())
 
 	tag1 := labels.LabelArray{labels.ParseLabel("tag1")}
 	serviceInfo := ServiceID{
@@ -125,7 +126,7 @@ func (s *K8sSuite) TestServiceMatches(c *C) {
 
 func (s *K8sSuite) TestTranslatorLabels(c *C) {
 	idAllocator := testidentity.NewMockIdentityAllocator(nil)
-	repo := policy.NewPolicyRepository(idAllocator, nil, nil)
+	repo := policy.NewPolicyRepository(idAllocator, nil, nil, metrics.NewLegacyMetrics())
 	svcLabels := map[string]string{
 		"app": "tested-service",
 	}

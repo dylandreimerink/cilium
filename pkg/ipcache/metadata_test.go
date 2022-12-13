@@ -15,6 +15,7 @@ import (
 	"github.com/cilium/cilium/pkg/identity"
 	"github.com/cilium/cilium/pkg/identity/cache"
 	"github.com/cilium/cilium/pkg/labels"
+	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/source"
 	testidentity "github.com/cilium/cilium/pkg/testutils/identity"
 )
@@ -129,6 +130,7 @@ func setupTest(t *testing.T) (cleanup func()) {
 		IdentityAllocator: allocator,
 		PolicyHandler:     &mockUpdater{},
 		DatapathHandler:   &mockTriggerer{},
+		LegacyMetrics:     metrics.NewLegacyMetrics(),
 	})
 	IPIdentityCache.k8sSyncedChecker = &mockK8sSyncedChecker{}
 

@@ -213,253 +213,489 @@ disable the following two metrics as they generate too much data:
 
 You can then configure the agent with ``--metrics="-cilium_node_connectivity_status -cilium_node_connectivity_latency_seconds"``.
 
-Exported Metrics by Default
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Endpoint
-~~~~~~~~
-
-============================================ ================================================== ========== ========================================================
-Name                                         Labels                                             Default    Description
-============================================ ================================================== ========== ========================================================
-``endpoint``                                                                                    Enabled    Number of endpoints managed by this agent
-``endpoint_regenerations_total``             ``outcome``                                        Enabled    Count of all endpoint regenerations that have completed
-``endpoint_regeneration_time_stats_seconds`` ``scope``                                          Enabled    Endpoint regeneration time stats
-``endpoint_state``                           ``state``                                          Enabled    Count of all endpoints
-============================================ ================================================== ========== ========================================================
-
-Services
-~~~~~~~~
-
-========================================== ================================================== ========== ========================================================
-Name                                       Labels                                             Default    Description
-========================================== ================================================== ========== ========================================================
-``services_events_total``                                                                     Enabled    Number of services events labeled by action type
-========================================== ================================================== ========== ========================================================
-
-Cluster health
-~~~~~~~~~~~~~~
-
-========================================== ================================================== ========== ========================================================
-Name                                       Labels                                             Default    Description
-========================================== ================================================== ========== ========================================================
-``unreachable_nodes``                                                                         Enabled    Number of nodes that cannot be reached
-``unreachable_health_endpoints``                                                              Enabled    Number of health endpoints that cannot be reached
-========================================== ================================================== ========== ========================================================
-
-Node Connectivity
-~~~~~~~~~~~~~~~~~
-
-========================================== ====================================================================================================================================================================== ========== ===================================================================================================================
-Name                                       Labels                                                                                                                                                                 Default    Description
-========================================== ====================================================================================================================================================================== ========== ===================================================================================================================
-``node_connectivity_status``               ``source_cluster``, ``source_node_name``, ``target_cluster``, ``target_node_name``, ``target_node_type``, ``type``                                                     Enabled    The last observed status of both ICMP and HTTP connectivity between the current Cilium agent and other Cilium nodes
-``node_connectivity_latency_seconds``      ``address_type``, ``protocol``, ``source_cluster``, ``source_node_name``, ``target_cluster``, ``target_node_ip``, ``target_node_name``, ``target_node_type``, ``type`` Enabled    The last observed latency between the current Cilium agent and other Cilium nodes in seconds
-========================================== ====================================================================================================================================================================== ========== ===================================================================================================================
-
-Clustermesh
-~~~~~~~~~~~
-
-=============================================== ============================================================ ========== =================================================================
-Name                                            Labels                                                       Default    Description
-=============================================== ============================================================ ========== =================================================================
-``clustermesh_global_services``                 ``source_cluster``, ``source_node_name``                     Enabled    The total number of global services in the cluster mesh
-``clustermesh_remote_clusters``                 ``source_cluster``, ``source_node_name``                     Enabled    The total number of remote clusters meshed with the local cluster
-``clustermesh_remote_cluster_failures``         ``source_cluster``, ``source_node_name``, ``target_cluster`` Enabled    The total number of failures related to the remote cluster
-``clustermesh_remote_cluster_nodes``            ``source_cluster``, ``source_node_name``, ``target_cluster`` Enabled    The total number of nodes in the remote cluster
-``clustermesh_remote_cluster_last_failure_ts``  ``source_cluster``, ``source_node_name``, ``target_cluster`` Enabled    The timestamp of the last failure of the remote cluster
-``clustermesh_remote_cluster_readiness_status`` ``source_cluster``, ``source_node_name``, ``target_cluster`` Enabled    The readiness status of the remote cluster
-=============================================== ============================================================ ========== =================================================================
-
-Datapath
-~~~~~~~~
-
-============================================= ================================================== ========== ========================================================
-Name                                          Labels                                             Default    Description
-============================================= ================================================== ========== ========================================================
-``datapath_conntrack_dump_resets_total``      ``area``, ``name``, ``family``                     Enabled    Number of conntrack dump resets. Happens when a BPF entry gets removed while dumping the map is in progress.
-``datapath_conntrack_gc_runs_total``          ``status``                                         Enabled    Number of times that the conntrack garbage collector process was run
-``datapath_conntrack_gc_key_fallbacks_total``                                                    Enabled    The number of alive and deleted conntrack entries at the end of a garbage collector run labeled by datapath family
-``datapath_conntrack_gc_entries``             ``family``                                         Enabled    The number of alive and deleted conntrack entries at the end of a garbage collector run
-``datapath_conntrack_gc_duration_seconds``    ``status``                                         Enabled    Duration in seconds of the garbage collector process
-============================================= ================================================== ========== ========================================================
-
-IPSec
-~~~~~
-
-============================================= ================================================== ========== ========================================================
-Name                                          Labels                                             Default    Description
-============================================= ================================================== ========== ========================================================
-``ipsec_xfrm_error``                          ``error``, ``type``                                Enabled    Total number of xfrm errors.
-============================================= ================================================== ========== ========================================================
-
-eBPF
-~~~~
-
-========================================== ===================================================================== ========== ========================================================
-Name                                       Labels                                                                Default    Description
-========================================== ===================================================================== ========== ========================================================
-``bpf_syscall_duration_seconds``           ``operation``, ``outcome``                                            Disabled   Duration of eBPF system call performed
-``bpf_map_ops_total``                      ``mapName`` (deprecated), ``map_name``, ``operation``, ``outcome``    Enabled    Number of eBPF map operations performed. ``mapName`` is deprecated and will be removed in 1.10. Use ``map_name`` instead.
-``bpf_map_pressure``                       ``map_name``                                                          Disabled   Map pressure defined as fill-up ratio of the map. Policy maps are exceptionally reported only when ratio is over 0.1.
-``bpf_maps_virtual_memory_max_bytes``                                                                            Enabled    Max memory used by eBPF maps installed in the system
-``bpf_progs_virtual_memory_max_bytes``                                                                           Enabled    Max memory used by eBPF programs installed in the system
-========================================== ===================================================================== ========== ========================================================
-
-Both ``bpf_maps_virtual_memory_max_bytes`` and ``bpf_progs_virtual_memory_max_bytes``
-are currently reporting the system-wide memory usage of eBPF that is directly
-and not directly managed by Cilium. This might change in the future and only
-report the eBPF memory usage directly managed by Cilium.
-
-Drops/Forwards (L3/L4)
-~~~~~~~~~~~~~~~~~~~~~~
-
-========================================== ================================================== ========== ========================================================
-Name                                       Labels                                             Default    Description
-========================================== ================================================== ========== ========================================================
-``drop_count_total``                       ``reason``, ``direction``                          Enabled    Total dropped packets
-``drop_bytes_total``                       ``reason``, ``direction``                          Enabled    Total dropped bytes
-``forward_count_total``                    ``direction``                                      Enabled    Total forwarded packets
-``forward_bytes_total``                    ``direction``                                      Enabled    Total forwarded bytes
-========================================== ================================================== ========== ========================================================
-
-Policy
-~~~~~~
-
-========================================== ================================================== ========== ========================================================
-Name                                       Labels                                             Default    Description
-========================================== ================================================== ========== ========================================================
-``policy``                                                                                    Enabled    Number of policies currently loaded
-``policy_regeneration_total``                                                                 Enabled    Total number of policies regenerated successfully
-``policy_regeneration_time_stats_seconds`` ``scope``                                          Enabled    Policy regeneration time stats labeled by the scope
-``policy_max_revision``                                                                       Enabled    Highest policy revision number in the agent
-``policy_import_errors_total``                                                                Enabled    Number of times a policy import has failed
-``policy_endpoint_enforcement_status``                                                        Enabled    Number of endpoints labeled by policy enforcement status
-========================================== ================================================== ========== ========================================================
-
-Policy L7 (HTTP/Kafka)
-~~~~~~~~~~~~~~~~~~~~~~
-
-======================================== ================================================== ========== ========================================================
-Name                                     Labels                                             Default    Description
-======================================== ================================================== ========== ========================================================
-``proxy_redirects``                      ``protocol``                                       Enabled    Number of redirects installed for endpoints
-``proxy_upstream_reply_seconds``                                                            Enabled    Seconds waited for upstream server to reply to a request
-``proxy_datapath_update_timeout_total``                                                     Disabled   Number of total datapath update timeouts due to FQDN IP updates
-``policy_l7_total``                      ``type``                                           Enabled    Number of total L7 requests/responses
-======================================== ================================================== ========== ========================================================
-
-Identity
-~~~~~~~~
-
-======================================== ================================================== ========== ========================================================
-Name                                     Labels                                             Default    Description
-======================================== ================================================== ========== ========================================================
-``identity``                             ``type``                                           Enabled    Number of identities currently allocated
-``ipcache_errors_total``                 ``type``, ``error``                                Enabled    Number of errors interacting with the ipcache
-``ipcache_events_total``                 ``type``                                           Enabled    Number of events interacting with the ipcache
-======================================== ================================================== ========== ========================================================
-
-Events external to Cilium
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-======================================== ================================================== ========== ========================================================
-Name                                     Labels                                             Default    Description
-======================================== ================================================== ========== ========================================================
-``event_ts``                             ``source``                                         Enabled    Last timestamp when we received an event
-======================================== ================================================== ========== ========================================================
-
-Controllers
-~~~~~~~~~~~
-
-======================================== ================================================== ========== ========================================================
-Name                                     Labels                                             Default    Description
-======================================== ================================================== ========== ========================================================
-``controllers_runs_total``               ``status``                                         Enabled    Number of times that a controller process was run
-``controllers_runs_duration_seconds``    ``status``                                         Enabled    Duration in seconds of the controller process
-``controllers_failing``                                                                     Enabled    Number of failing controllers
-======================================== ================================================== ========== ========================================================
-
-SubProcess
-~~~~~~~~~~
-
-======================================== ================================================== ========== ========================================================
-Name                                     Labels                                             Default    Description
-======================================== ================================================== ========== ========================================================
-``subprocess_start_total``               ``subsystem``                                      Enabled    Number of times that Cilium has started a subprocess
-======================================== ================================================== ========== ========================================================
-
-Kubernetes
-~~~~~~~~~~
-
-=========================================== ================================================== ========== ========================================================
-Name                                        Labels                                             Default    Description
-=========================================== ================================================== ========== ========================================================
-``kubernetes_events_received_total``        ``scope``, ``action``, ``validity``, ``equal``     Enabled    Number of Kubernetes events received
-``kubernetes_events_total``                 ``scope``, ``action``, ``outcome``                 Enabled    Number of Kubernetes events processed
-``k8s_cnp_status_completion_seconds``       ``attempts``, ``outcome``                          Enabled    Duration in seconds in how long it took to complete a CNP status update
-``k8s_terminating_endpoints_events_total``                                                     Enabled    Number of terminating endpoint events received from Kubernetes
-=========================================== ================================================== ========== ========================================================
-
-IPAM
-~~~~
-
-======================================== ============================================ ========== ========================================================
-Name                                     Labels                                       Default    Description
-======================================== ============================================ ========== ========================================================
-``ipam_events_total``                                                                 Enabled    Number of IPAM events received labeled by action and datapath family type
-``ip_addresses``                         ``family``                                   Enabled    Number of allocated IP addresses
-======================================== ============================================ ========== ========================================================
-
-KVstore
-~~~~~~~
-
-======================================== ============================================ ========== ========================================================
-Name                                     Labels                                       Default    Description
-======================================== ============================================ ========== ========================================================
-``kvstore_operations_duration_seconds``  ``action``, ``kind``, ``outcome``, ``scope`` Enabled    Duration of kvstore operation
-``kvstore_events_queue_seconds``         ``action``, ``scope``                        Enabled    Duration of seconds of time received event was blocked before it could be queued
-``kvstore_quorum_errors_total``          ``error``                                    Enabled    Number of quorum errors
-======================================== ============================================ ========== ========================================================
+Exported Metrics
+^^^^^^^^^^^^^^^^
 
 Agent
 ~~~~~
++----------------------------------+-------------------------------------+--------+-----------+
+|Name                              |Labels                               |Default |Description|
++==================================+=====================================+========+===========+
+|``agent_api_process_time_seconds``|``path``, ``method``, ``return_code``|Enabled |           |
++----------------------------------+-------------------------------------+--------+-----------+
+|``agent_bootstrap_seconds``       |``scope``, ``outcome``               |Enabled |           |
++----------------------------------+-------------------------------------+--------+-----------+
 
-================================ ================================ ========== ========================================================
-Name                             Labels                           Default    Description
-================================ ================================ ========== ========================================================
-``agent_bootstrap_seconds``      ``scope``, ``outcome``           Enabled    Duration of various bootstrap phases
-``api_process_time_seconds``                                      Enabled    Processing time of all the API calls made to the cilium-agent, labeled by API method, API path and returned HTTP code.
-================================ ================================ ========== ========================================================
+Agent Labels
+************
+
++---------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+-----------------+
+|Name           |Description                                                                                                                                                                              |Known Value|Value Description|
++===============+=========================================================================================================================================================================================+===========+=================+
+|``path``       |The API path                                                                                                                                                                             |           |                 |
++---------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+-----------------+
+|``method``     |The HTTP method                                                                                                                                                                          |           |                 |
++---------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+-----------------+
+|``return_code``|The HTTP code returned for that API path                                                                                                                                                 |           |                 |
++---------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+-----------------+
+|``scope``      |Used to defined multiples scopes in the same. For example, one counter may measure a metric over the scope of the entire event (scope=global), or just part of an event (scope=slow_path)|           |                 |
++---------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+-----------------+
+|``outcome``    |Indicates whether the outcome of the operation was successful or not                                                                                                                     |``success``|                 |
+|               |                                                                                                                                                                                         +-----------+-----------------+
+|               |                                                                                                                                                                                         |``fail``   |                 |
++---------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+-----------------+
+
+API Limiter
+~~~~~~~~~~~
++---------------------------------------------+-------------------------+--------+-----------+
+|Name                                         |Labels                   |Default |Description|
++=============================================+=========================+========+===========+
+|``api_limiter_processed_requests_total``     |``api_call``, ``outcome``|Enabled |           |
++---------------------------------------------+-------------------------+--------+-----------+
+|``api_limiter_wait_duration_seconds``        |``api_call``, ``value``  |Enabled |           |
++---------------------------------------------+-------------------------+--------+-----------+
+|``api_limiter_requests_in_flight``           |``api_call``, ``value``  |Enabled |           |
++---------------------------------------------+-------------------------+--------+-----------+
+|``api_limiter_processing_duration_seconds``  |``api_call``, ``value``  |Enabled |           |
++---------------------------------------------+-------------------------+--------+-----------+
+|``api_limiter_adjustment_factor``            |``api_call``             |Enabled |           |
++---------------------------------------------+-------------------------+--------+-----------+
+|``api_limiter_wait_history_duration_seconds``|``api_call``             |Disabled|           |
++---------------------------------------------+-------------------------+--------+-----------+
+|``api_limiter_rate_limit``                   |``api_call``, ``value``  |Enabled |           |
++---------------------------------------------+-------------------------+--------+-----------+
+
+API Limiter Labels
+******************
+
++-----------+--------------------------------------------------------------------+-----------+-----------------+
+|Name       |Description                                                         |Known Value|Value Description|
++===========+====================================================================+===========+=================+
+|``outcome``|Indicates whether the outcome of the operation was successful or not|``success``|                 |
+|           |                                                                    +-----------+-----------------+
+|           |                                                                    |``fail``   |                 |
++-----------+--------------------------------------------------------------------+-----------+-----------------+
+
+eBPF
+~~~~
+Both ``bpf_maps_virtual_memory_max_bytes`` and ``bpf_progs_virtual_memory_max_bytes`` are currently reporting the system-wide memory usage of eBPF that is directly and not directly managed by Cilium. This might change in the future and only report the eBPF memory usage directly managed by Cilium.
+
++--------------------------------+----------------------------------------+--------+-----------+
+|Name                            |Labels                                  |Default |Description|
++================================+========================================+========+===========+
+|``bpf_map_pressure``            |``map_name``                            |Disabled|           |
++--------------------------------+----------------------------------------+--------+-----------+
+|``bpf_map_ops_total``           |``map_name``, ``operation``, ``outcome``|Enabled |           |
++--------------------------------+----------------------------------------+--------+-----------+
+|``bpf_syscall_duration_seconds``|``operation``, ``outcome``              |Disabled|           |
++--------------------------------+----------------------------------------+--------+-----------+
+
+eBPF Labels
+***********
+
++-------------+--------------------------------------------------------------------+-----------+-----------------+
+|Name         |Description                                                         |Known Value|Value Description|
++=============+====================================================================+===========+=================+
+|``map_name`` |The label for the BPF map name                                      |           |                 |
++-------------+--------------------------------------------------------------------+-----------+-----------------+
+|``operation``|The label for BPF maps operations                                   |           |                 |
++-------------+--------------------------------------------------------------------+-----------+-----------------+
+|``outcome``  |Indicates whether the outcome of the operation was successful or not|``success``|                 |
+|             |                                                                    +-----------+-----------------+
+|             |                                                                    |``fail``   |                 |
++-------------+--------------------------------------------------------------------+-----------+-----------------+
+
+Clustermesh
+~~~~~~~~~~~
++-----------------------------------------------+------------------------------------------------------------+--------+-----------+
+|Name                                           |Labels                                                      |Default |Description|
++===============================================+============================================================+========+===========+
+|``clustermesh_remote_clusters``                |``source_cluster``, ``source_node_name``                    |Disabled|           |
++-----------------------------------------------+------------------------------------------------------------+--------+-----------+
+|``clustermesh_remote_cluster_failures``        |``source_cluster``, ``source_node_name``, ``target_cluster``|Disabled|           |
++-----------------------------------------------+------------------------------------------------------------+--------+-----------+
+|``clustermesh_remote_cluster_readiness_status``|``source_cluster``, ``source_node_name``, ``target_cluster``|Disabled|           |
++-----------------------------------------------+------------------------------------------------------------+--------+-----------+
+|``clustermesh_remote_cluster_nodes``           |``source_cluster``, ``source_node_name``, ``target_cluster``|Disabled|           |
++-----------------------------------------------+------------------------------------------------------------+--------+-----------+
+|``clustermesh_global_services``                |``source_cluster``, ``source_node_name``                    |Disabled|           |
++-----------------------------------------------+------------------------------------------------------------+--------+-----------+
+|``clustermesh_remote_cluster_last_failure_ts`` |``source_cluster``, ``source_node_name``, ``target_cluster``|Disabled|           |
++-----------------------------------------------+------------------------------------------------------------+--------+-----------+
+
+Clustermesh Labels
+******************
+
++--------------------+---------------------------------+-----------+-----------------+
+|Name                |Description                      |Known Value|Value Description|
++====================+=================================+===========+=================+
+|``source_node_name``|The label for source node name   |           |                 |
++--------------------+---------------------------------+-----------+-----------------+
+|``target_cluster``  |The label for target cluster name|           |                 |
++--------------------+---------------------------------+-----------+-----------------+
+|``source_cluster``  |The label for source cluster name|           |                 |
++--------------------+---------------------------------+-----------+-----------------+
+
+Datapath
+~~~~~~~~
++---------------------------------------------+-------------------------------------+--------+-----------+
+|Name                                         |Labels                               |Default |Description|
++=============================================+=====================================+========+===========+
+|``datapath_signals_handled_total``           |``signal``, ``data``, ``status``     |Enabled |           |
++---------------------------------------------+-------------------------------------+--------+-----------+
+|``datapath_conntrack_gc_runs_total``         |``family``, ``protocol``, ``status`` |Enabled |           |
++---------------------------------------------+-------------------------------------+--------+-----------+
+|``datapath_conntrack_gc_key_fallbacks_total``|``family``, ``protocol``             |Enabled |           |
++---------------------------------------------+-------------------------------------+--------+-----------+
+|``datapath_nat_gc_entries``                  |``family``, ``direction``, ``status``|Enabled |           |
++---------------------------------------------+-------------------------------------+--------+-----------+
+|``datapath_conntrack_gc_duration_seconds``   |``family``, ``protocol``, ``status`` |Enabled |           |
++---------------------------------------------+-------------------------------------+--------+-----------+
+|``datapath_conntrack_dump_resets_total``     |``area``, ``name``, ``family``       |Enabled |           |
++---------------------------------------------+-------------------------------------+--------+-----------+
+|``datapath_conntrack_gc_entries``            |``family``, ``protocol``, ``status`` |Enabled |           |
++---------------------------------------------+-------------------------------------+--------+-----------+
+
+Datapath Labels
+***************
+
++-------------+-----------------------------------------------------------------------------------------------------+-----------+-----------------+
+|Name         |Description                                                                                          |Known Value|Value Description|
++=============+=====================================================================================================+===========+=================+
+|``direction``|The label for traffic direction                                                                      |           |                 |
++-------------+-----------------------------------------------------------------------------------------------------+-----------+-----------------+
+|``area``     |Marks which area the metrics are related to (eg, which BPF map)                                      |           |                 |
++-------------+-----------------------------------------------------------------------------------------------------+-----------+-----------------+
+|``name``     |marks a unique identifier for this metric. The name should be defined once for a given type of error.|           |                 |
++-------------+-----------------------------------------------------------------------------------------------------+-----------+-----------------+
+|``signal``   |Marks the signal name                                                                                |           |                 |
++-------------+-----------------------------------------------------------------------------------------------------+-----------+-----------------+
+|``data``     |Marks the signal data                                                                                |           |                 |
++-------------+-----------------------------------------------------------------------------------------------------+-----------+-----------------+
+|``status``   |The label from completed task                                                                        |           |                 |
++-------------+-----------------------------------------------------------------------------------------------------+-----------+-----------------+
+|``family``   |Marks which protocol family (IPv4, IPV6) the metric is related to.                                   |           |                 |
++-------------+-----------------------------------------------------------------------------------------------------+-----------+-----------------+
+|``protocol`` |Marks the L4 protocol (TCP, ANY) for the metric.                                                     |           |                 |
++-------------+-----------------------------------------------------------------------------------------------------+-----------+-----------------+
 
 FQDN
 ~~~~
++---------------------------------+------------+--------+-----------+
+|Name                             |Labels      |Default |Description|
++=================================+============+========+===========+
+|``fqdn_active_names``            |``endpoint``|Disabled|           |
++---------------------------------+------------+--------+-----------+
+|``fqdn_active_ips``              |``endpoint``|Disabled|           |
++---------------------------------+------------+--------+-----------+
+|``fqdn_alive_zombie_connections``|``endpoint``|Disabled|           |
++---------------------------------+------------+--------+-----------+
+|``fqdn_gc_deletions_total``      |            |Enabled |           |
++---------------------------------+------------+--------+-----------+
+|``fqdn_semaphore_rejected_total``|            |Disabled|           |
++---------------------------------+------------+--------+-----------+
 
-================================== ================================ ============ ========================================================
-Name                               Labels                           Default      Description
-================================== ================================ ============ ========================================================
-``fqdn_gc_deletions_total``                                         Enabled      Number of FQDNs that have been cleaned on FQDN garbage collector job
-``fqdn_active_names``              ``endpoint``                     Disabled     Number of domains inside the DNS cache that have not expired (by TTL), per endpoint
-``fqdn_active_ips``                ``endpoint``                     Disabled     Number of IPs inside the DNS cache associated with a domain that has not expired (by TTL), per endpoint
-``fqdn_alive_zombie_connections``  ``endpoint``                     Disabled     Number of IPs associated with domains that have expired (by TTL) yet still associated with an active connection (aka zombie), per endpoint
-================================== ================================ ============ ========================================================
+IPCache
+~~~~~~~
++------------------------+-------------------+--------+-----------+
+|Name                    |Labels             |Default |Description|
++========================+===================+========+===========+
+|``ipcache_events_total``|``type``           |Enabled |           |
++------------------------+-------------------+--------+-----------+
+|``ipcache_errors_total``|``type``, ``error``|Enabled |           |
++------------------------+-------------------+--------+-----------+
 
-.. _metrics_api_rate_limiting:
+IPCache Labels
+**************
 
-API Rate Limiting
++---------+------------------------------------+-----------+-----------------+
+|Name     |Description                         |Known Value|Value Description|
++=========+====================================+===========+=================+
+|``error``|Indicates the type of error (string)|           |                 |
++---------+------------------------------------+-----------+-----------------+
+
+IPSec
+~~~~~
++--------------------+-------------------+--------+-----------+
+|Name                |Labels             |Default |Description|
++====================+===================+========+===========+
+|``ipsec_xfrm_error``|``type``, ``error``|Disabled|           |
++--------------------+-------------------+--------+-----------+
+
+IPSec Labels
+************
+
++---------+------------------------------------+-----------+-----------------+
+|Name     |Description                         |Known Value|Value Description|
++=========+====================================+===========+=================+
+|``error``|Indicates the type of error (string)|           |                 |
++---------+------------------------------------+-----------+-----------------+
+
+Kubernetes
+~~~~~~~~~~
++------------------------------------------+-------------------------+--------+-----------+
+|Name                                      |Labels                   |Default |Description|
++==========================================+=========================+========+===========+
+|``k8s_terminating_endpoints_events_total``|                         |Enabled |           |
++------------------------------------------+-------------------------+--------+-----------+
+|``k8s_cnp_status_completion_seconds``     |``attempts``, ``outcome``|Enabled |           |
++------------------------------------------+-------------------------+--------+-----------+
+
+Kubernetes Labels
+*****************
+
++------------+--------------------------------------------------------------------+-----------+-----------------+
+|Name        |Description                                                         |Known Value|Value Description|
++============+====================================================================+===========+=================+
+|``attempts``|The number of attempts it took to complete the operation            |           |                 |
++------------+--------------------------------------------------------------------+-----------+-----------------+
+|``outcome`` |Indicates whether the outcome of the operation was successful or not|``success``|                 |
+|            |                                                                    +-----------+-----------------+
+|            |                                                                    |``fail``   |                 |
++------------+--------------------------------------------------------------------+-----------+-----------------+
+
+Kubernetes Client
 ~~~~~~~~~~~~~~~~~
++---------------------------------------+-------------------------------------+--------+-----------+
+|Name                                   |Labels                               |Default |Description|
++=======================================+=====================================+========+===========+
+|``k8s_client_api_calls_total``         |``host``, ``method``, ``return_code``|Enabled |           |
++---------------------------------------+-------------------------------------+--------+-----------+
+|``k8s_client_api_latency_time_seconds``|``path``, ``method``                 |Enabled |           |
++---------------------------------------+-------------------------------------+--------+-----------+
 
-============================================== ================================ ========== ========================================================
-Name                                           Labels                           Default    Description
-============================================== ================================ ========== ========================================================
-``api_limiter_adjustment_factor``              ``api_call``                     Enabled    Most recent adjustment factor for automatic adjustment
-``api_limiter_processed_requests_total``       ``api_call``, ``outcome``        Enabled    Total number of API requests processed
-``api_limiter_processing_duration_seconds``    ``api_call``, ``value``          Enabled    Mean and estimated processing duration in seconds
-``api_limiter_rate_limit``                     ``api_call``, ``value``          Enabled    Current rate limiting configuration (limit and burst)
-``api_limiter_requests_in_flight``             ``api_call``  ``value``          Enabled    Current and maximum allowed number of requests in flight
-``api_limiter_wait_duration_seconds``          ``api_call``, ``value``          Enabled    Mean, min, and max wait duration
-``api_limiter_wait_history_duration_seconds``  ``api_call``                     Disabled   Histogram of wait duration per API call processed
-============================================== ================================ ========== ========================================================
+Kubernetes Client Labels
+************************
+
++---------------+----------------------------------------+-----------+-----------------+
+|Name           |Description                             |Known Value|Value Description|
++===============+========================================+===========+=================+
+|``method``     |The HTTP method                         |           |                 |
++---------------+----------------------------------------+-----------+-----------------+
+|``return_code``|The HTTP code returned for that API path|           |                 |
++---------------+----------------------------------------+-----------+-----------------+
+|``path``       |The API path                            |           |                 |
++---------------+----------------------------------------+-----------+-----------------+
+
+KVStore
+~~~~~~~
++---------------------------------------+--------------------------------------------+--------+-----------+
+|Name                                   |Labels                                      |Default |Description|
++=======================================+============================================+========+===========+
+|``kvstore_events_queue_seconds``       |``scope``, ``action``                       |Enabled |           |
++---------------------------------------+--------------------------------------------+--------+-----------+
+|``kvstore_operations_duration_seconds``|``scope``, ``kind``, ``action``, ``outcome``|Enabled |           |
++---------------------------------------+--------------------------------------------+--------+-----------+
+|``kvstore_quorum_errors_total``        |``error``                                   |Enabled |           |
++---------------------------------------+--------------------------------------------+--------+-----------+
+
+KVStore Labels
+**************
+
++-----------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+-----------------+
+|Name       |Description                                                                                                                                                                              |Known Value|Value Description|
++===========+=========================================================================================================================================================================================+===========+=================+
+|``scope``  |Used to defined multiples scopes in the same. For example, one counter may measure a metric over the scope of the entire event (scope=global), or just part of an event (scope=slow_path)|           |                 |
++-----------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+-----------------+
+|``action`` |The label used to defined what kind of action was performed in a metric                                                                                                                  |           |                 |
++-----------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+-----------------+
+|``kind``   |The kind of a label                                                                                                                                                                      |           |                 |
++-----------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+-----------------+
+|``outcome``|Indicates whether the outcome of the operation was successful or not                                                                                                                     |``success``|                 |
+|           |                                                                                                                                                                                         +-----------+-----------------+
+|           |                                                                                                                                                                                         |``fail``   |                 |
++-----------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+-----------------+
+|``error``  |Indicates the type of error (string)                                                                                                                                                     |           |                 |
++-----------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+-----------------+
+
+Misc
+~~~~
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|Name                                        |Labels                                                                                                                                                                |Default |Description|
++============================================+======================================================================================================================================================================+========+===========+
+|``forward_bytes_total``                     |``direction``                                                                                                                                                         |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``controllers_runs_duration_seconds``       |``status``                                                                                                                                                            |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``policy_endpoint_enforcement_status``      |``enforcement``                                                                                                                                                       |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``policy_import_errors_total``              |                                                                                                                                                                      |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``endpoint_propagation_delay_seconds``      |                                                                                                                                                                      |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``endpoint_regeneration_time_stats_seconds``|``scope``, ``status``                                                                                                                                                 |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``kubernetes_events_total``                 |``scope``, ``action``, ``status``                                                                                                                                     |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``errors_warnings_total``                   |``level``, ``subsystem``                                                                                                                                              |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``policy_regeneration_time_stats_seconds``  |``scope``, ``status``                                                                                                                                                 |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``identity``                                |``type``                                                                                                                                                              |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``forward_count_total``                     |``direction``                                                                                                                                                         |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``endpoint_state``                          |``endpoint_state``                                                                                                                                                    |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``proxy_datapath_update_timeout_total``     |                                                                                                                                                                      |Disabled|           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``drop_bytes_total``                        |``reason``, ``direction``                                                                                                                                             |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``kubernetes_events_received_total``        |``scope``, ``action``, ``valid``, ``equal``                                                                                                                           |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``policy``                                  |                                                                                                                                                                      |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``event_ts``                                |``source``, ``scope``, ``action``                                                                                                                                     |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``endpoint_regenerations_total``            |``outcome``                                                                                                                                                           |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``policy_regeneration_total``               |                                                                                                                                                                      |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``node_connectivity_latency_seconds``       |``source_cluster``, ``source_node_name``, ``target_cluster``, ``target_node_name``, ``target_node_ip``, ``target_node_type``, ``type``, ``protocol``, ``address_type``|Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``node_connectivity_status``                |``source_cluster``, ``source_node_name``, ``target_cluster``, ``target_node_name``, ``target_node_type``, ``type``                                                    |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``version``                                 |``version``                                                                                                                                                           |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``controllers_runs_total``                  |``status``                                                                                                                                                            |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``drop_count_total``                        |``reason``, ``direction``                                                                                                                                             |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``policy_implementation_delay``             |``source``                                                                                                                                                            |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``subprocess_start_total``                  |``subsystem``                                                                                                                                                         |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``proxy_upstream_reply_seconds``            |``error``, ``protocol_l7``, ``scope``                                                                                                                                 |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``k8s_event_lag_seconds``                   |``source``                                                                                                                                                            |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``services_events_total``                   |``action``                                                                                                                                                            |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``policy_max_revision``                     |                                                                                                                                                                      |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+|``ipam_events_total``                       |``action``, ``family``                                                                                                                                                |Enabled |           |
++--------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+-----------+
+
+Misc Labels
+***********
+
++--------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+---------------------------------------------------+
+|Name                |Description                                                                                                                                                                              |Known Value|Value Description                                  |
++====================+=========================================================================================================================================================================================+===========+===================================================+
+|``target_cluster``  |The label for target cluster name                                                                                                                                                        |           |                                                   |
++--------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+---------------------------------------------------+
+|``version``         |The label for the version number                                                                                                                                                         |           |                                                   |
++--------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+---------------------------------------------------+
+|``protocol_l7``     |The label used when working with layer 7 protocols.                                                                                                                                      |           |                                                   |
++--------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+---------------------------------------------------+
+|``direction``       |The label for traffic direction                                                                                                                                                          |           |                                                   |
++--------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+---------------------------------------------------+
+|``enforcement``     |The label used to see the enforcement status                                                                                                                                             |           |                                                   |
++--------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+---------------------------------------------------+
+|``target_node_name``|The label for target node name                                                                                                                                                           |           |                                                   |
++--------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+---------------------------------------------------+
+|``target_node_type``|The label for target node type (local_node, remote_intra_cluster, vs remote_inter_cluster)                                                                                               |           |                                                   |
++--------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+---------------------------------------------------+
+|``status``          |The label from completed task                                                                                                                                                            |           |                                                   |
++--------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+---------------------------------------------------+
+|``family``          |Marks which protocol family (IPv4, IPV6) the metric is related to.                                                                                                                       |           |                                                   |
++--------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+---------------------------------------------------+
+|``source_node_name``|The label for source node name                                                                                                                                                           |           |                                                   |
++--------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+---------------------------------------------------+
+|``target_node_ip``  |The label for target node IP                                                                                                                                                             |           |                                                   |
++--------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+---------------------------------------------------+
+|``protocol``        |Marks the L4 protocol (TCP, ANY) for the metric.                                                                                                                                         |           |                                                   |
++--------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+---------------------------------------------------+
+|``scope``           |Used to defined multiples scopes in the same. For example, one counter may measure a metric over the scope of the entire event (scope=global), or just part of an event (scope=slow_path)|           |                                                   |
++--------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+---------------------------------------------------+
+|``source_cluster``  |The label for source cluster name                                                                                                                                                        |           |                                                   |
++--------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+---------------------------------------------------+
+|``subsystem``       |The label used to refer to any of the child process started by cilium (Envoy, monitor, etc..)                                                                                            |           |                                                   |
++--------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+---------------------------------------------------+
+|``source``          |                                                                                                                                                                                         |``api``    |Marks event-related metrics that come from the API |
+|                    |                                                                                                                                                                                         +-----------+---------------------------------------------------+
+|                    |                                                                                                                                                                                         |``k8s``    |Marks event-related metrics that come from k8s     |
+|                    |                                                                                                                                                                                         +-----------+---------------------------------------------------+
+|                    |                                                                                                                                                                                         |``fqdn``   |Marks event-related metrics that come from pkg/fqdn|
+|                    |                                                                                                                                                                                         +-----------+---------------------------------------------------+
+|                    |                                                                                                                                                                                         |``docker`` |Marks event-related metrics that come from docker  |
++--------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+---------------------------------------------------+
+|``action``          |The label used to defined what kind of action was performed in a metric                                                                                                                  |           |                                                   |
++--------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+---------------------------------------------------+
+|``level``           |Log level                                                                                                                                                                                |``error``  |                                                   |
+|                    |                                                                                                                                                                                         +-----------+---------------------------------------------------+
+|                    |                                                                                                                                                                                         |``warning``|                                                   |
++--------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------+---------------------------------------------------+
+
+Node Neighbor
+~~~~~~~~~~~~~
++------------------------------------+----------+--------+-----------+
+|Name                                |Labels    |Default |Description|
++====================================+==========+========+===========+
+|``node_neigh_arping_requests_total``|``status``|Enabled |           |
++------------------------------------+----------+--------+-----------+
+
+Node Neighbor Labels
+********************
+
++----------+-----------------------------+-----------+-----------------+
+|Name      |Description                  |Known Value|Value Description|
++==========+=============================+===========+=================+
+|``status``|The label from completed task|           |                 |
++----------+-----------------------------+-----------+-----------------+
+
+Nodes
+~~~~~
++----------------------------------------+--------------------------+--------+-----------+
+|Name                                    |Labels                    |Default |Description|
++========================================+==========================+========+===========+
+|``nodes_all_events_received_total``     |``event_type``, ``source``|Enabled |           |
++----------------------------------------+--------------------------+--------+-----------+
+|``nodes_all_datapath_validations_total``|                          |Enabled |           |
++----------------------------------------+--------------------------+--------+-----------+
+|``nodes_all_num``                       |                          |Enabled |           |
++----------------------------------------+--------------------------+--------+-----------+
+
+Policy L7 (HTTP/Kafka)
+~~~~~~~~~~~~~~~~~~~~~~
++--------------------------------+---------------+--------+-----------+
+|Name                            |Labels         |Default |Description|
++================================+===============+========+===========+
+|``proxy_redirects``             |``protocol_l7``|Enabled |           |
++--------------------------------+---------------+--------+-----------+
+|``policy_l7_forwarded_total``   |               |Enabled |           |
++--------------------------------+---------------+--------+-----------+
+|``policy_l7_total``             |``rule``       |Enabled |           |
++--------------------------------+---------------+--------+-----------+
+|``policy_l7_denied_total``      |               |Enabled |           |
++--------------------------------+---------------+--------+-----------+
+|``policy_l7_received_total``    |               |Enabled |           |
++--------------------------------+---------------+--------+-----------+
+|``policy_l7_parse_errors_total``|               |Enabled |           |
++--------------------------------+---------------+--------+-----------+
+
+Policy L7 (HTTP/Kafka) Labels
+*****************************
+
++---------------+---------------------------------------------------+-----------+-----------------+
+|Name           |Description                                        |Known Value|Value Description|
++===============+===================================================+===========+=================+
+|``protocol_l7``|The label used when working with layer 7 protocols.|           |                 |
++---------------+---------------------------------------------------+-----------+-----------------+
+
+Triggers
+~~~~~~~~
++------------------------------------------------+----------+--------+-----------+
+|Name                                            |Labels    |Default |Description|
++================================================+==========+========+===========+
+|``triggers_policy_update_total``                |``reason``|Enabled |           |
++------------------------------------------------+----------+--------+-----------+
+|``triggers_policy_update_folds``                |          |Enabled |           |
++------------------------------------------------+----------+--------+-----------+
+|``triggers_policy_update_call_duration_seconds``|``type``  |Enabled |           |
++------------------------------------------------+----------+--------+-----------+
+
+
 
 cilium-operator
 ---------------

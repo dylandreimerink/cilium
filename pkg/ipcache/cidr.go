@@ -17,7 +17,6 @@ import (
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/labels/cidr"
 	"github.com/cilium/cilium/pkg/logging/logfields"
-	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/source"
 )
@@ -155,7 +154,7 @@ func (ipc *IPCache) UpsertGeneratedIdentities(newlyAllocatedIdentities map[netip
 	}
 	ipc.mutex.RUnlock()
 	for prefix, id := range toUpsert {
-		metrics.IPCacheErrorsTotal.WithLabelValues(
+		ipc.Configuration.LegacyMetrics.IPCacheErrorsTotal.WithLabelValues(
 			metricTypeRecover, metricErrorUnexpected,
 		).Inc()
 		ipc.Upsert(prefix.String(), nil, 0, nil, Identity{

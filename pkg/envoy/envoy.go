@@ -135,7 +135,7 @@ func GetEnvoyVersion() string {
 }
 
 // StartEnvoy starts an Envoy proxy instance.
-func StartEnvoy(stateDir, logPath string, baseID uint64) *Envoy {
+func StartEnvoy(legacyMetrics *metrics.LegacyMetrics, stateDir, logPath string, baseID uint64) *Envoy {
 	bootstrapPath := filepath.Join(stateDir, "bootstrap.pb")
 	xdsPath := getXDSPath(stateDir)
 
@@ -218,7 +218,7 @@ func StartEnvoy(stateDir, logPath string, baseID uint64) *Envoy {
 			}
 
 			log.Infof("Envoy: Proxy started with pid %d", cmd.Process.Pid)
-			metrics.SubprocessStart.WithLabelValues(ciliumEnvoy).Inc()
+			legacyMetrics.SubprocessStart.WithLabelValues(ciliumEnvoy).Inc()
 
 			// We do not return after a successful start, but watch the Envoy process
 			// and restart it if it crashes.

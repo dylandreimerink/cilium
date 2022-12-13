@@ -17,6 +17,7 @@ import (
 	datapathOpt "github.com/cilium/cilium/pkg/datapath/option"
 	datapathTypes "github.com/cilium/cilium/pkg/datapath/types"
 	lb "github.com/cilium/cilium/pkg/loadbalancer"
+	"github.com/cilium/cilium/pkg/metrics"
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/service/healthserver"
@@ -142,7 +143,7 @@ func (m *ManagerTestSuite) SetUpTest(c *C) {
 	backendIDAlloc.resetLocalID()
 
 	m.lbmap = mockmaps.NewLBMockMap()
-	m.svc = NewService(nil, nil, m.lbmap)
+	m.svc = NewService(nil, nil, m.lbmap, metrics.NewLegacyMetrics())
 
 	m.svcHealth = healthserver.NewMockHealthHTTPServerFactory()
 	m.svc.healthServer = healthserver.WithHealthHTTPServerFactory(m.svcHealth)
@@ -481,7 +482,7 @@ func (m *ManagerTestSuite) TestRestoreServices(c *C) {
 	option.Config.NodePortAlg = option.NodePortAlgMaglev
 	option.Config.DatapathMode = datapathOpt.DatapathModeLBOnly
 	lbmap := m.svc.lbmap.(*mockmaps.LBMockMap)
-	m.svc = NewService(nil, nil, lbmap)
+	m.svc = NewService(nil, nil, lbmap, metrics.NewLegacyMetrics())
 
 	// Restore services from lbmap
 	err = m.svc.RestoreServices()
@@ -550,7 +551,7 @@ func (m *ManagerTestSuite) TestSyncWithK8sFinished(c *C) {
 
 	// Restart service, but keep the lbmap to restore services from
 	lbmap := m.svc.lbmap.(*mockmaps.LBMockMap)
-	m.svc = NewService(nil, nil, lbmap)
+	m.svc = NewService(nil, nil, lbmap, metrics.NewLegacyMetrics())
 	err = m.svc.RestoreServices()
 	c.Assert(err, IsNil)
 	c.Assert(len(m.svc.svcByID), Equals, 2)
@@ -1055,7 +1056,7 @@ func (m *ManagerTestSuite) TestRestoreServiceWithTerminatingBackends(c *C) {
 
 	// Simulate agent restart.
 	lbmap := m.svc.lbmap.(*mockmaps.LBMockMap)
-	m.svc = NewService(nil, nil, lbmap)
+	m.svc = NewService(nil, nil, lbmap, metrics.NewLegacyMetrics())
 
 	// Restore services from lbmap
 	err = m.svc.RestoreServices()
@@ -1274,7 +1275,7 @@ func (m *ManagerTestSuite) TestRestoreServiceWithBackendStates(c *C) {
 
 	// Simulate agent restart.
 	lbmap := m.svc.lbmap.(*mockmaps.LBMockMap)
-	m.svc = NewService(nil, nil, lbmap)
+	m.svc = NewService(nil, nil, lbmap, metrics.NewLegacyMetrics())
 
 	// Restore services from lbmap
 	err = m.svc.RestoreServices()
