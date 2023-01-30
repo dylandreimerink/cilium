@@ -232,8 +232,9 @@ func (r *resource[T]) Stop(stopCtx hive.HookContext) error {
 }
 
 type eventsOpts struct {
-	rateLimiter  workqueue.RateLimiter
-	errorHandler ErrorHandler
+	rateLimiter   workqueue.RateLimiter
+	errorHandler  ErrorHandler
+	gossipChannel chan EventGossip
 }
 
 type EventsOpt func(*eventsOpts)
@@ -250,6 +251,22 @@ func WithRateLimiter(r workqueue.RateLimiter) EventsOpt {
 func WithErrorHandler(h ErrorHandler) EventsOpt {
 	return func(o *eventsOpts) {
 		o.errorHandler = h
+	}
+}
+
+type EventGossip struct {
+	Kind        EventKind
+	Key         Key
+	Done        bool
+	QueueLength int
+}
+
+// WithDoneSubscriber specifies a channel to which a the key of an even will be written as soon as it has been
+// marked Done by the consumer of the event stream. Intended to allow tests to get notified when a consumer under test
+// has processed an event.
+func WithGossip(ch chan EventGossip) EventsOpt {
+	return func(o *eventsOpts) {
+		o.gossipChannel = ch
 	}
 }
 
@@ -362,10 +379,20 @@ func (r *resource[T]) Events(ctx context.Context, opts ...EventsOpt) <-chan Even
 				// which panics. If Done() is called, the finalizer is unset.
 				eventDoneSentinel = new(bool)
 				event             Event[T]
+				gossip            EventGossip
 			)
 			event.Done = func(err error) {
 				runtime.SetFinalizer(eventDoneSentinel, nil)
 				queue.eventDone(entry, err)
+
+				if options.gossipChannel != nil {
+					gossip.QueueLength = queue.Len()
+					gossip.Done = true
+					select {
+					case options.gossipChannel <- gossip:
+					default:
+					}
+				}
 			}
 
 			// Add a finalizer to catch forgotten calls to Done().
@@ -393,8 +420,20 @@ func (r *resource[T]) Events(ctx context.Context, opts ...EventsOpt) <-chan Even
 				panic(fmt.Sprintf("%T: unknown entry type %T", r, entry))
 			}
 
+			if options.gossipChannel != nil {
+				gossip.Kind = event.Kind
+				gossip.Key = event.Key
+			}
+
 			select {
 			case out <- event:
+				if options.gossipChannel != nil {
+					gossip.QueueLength = queue.Len()
+					select {
+					case options.gossipChannel <- gossip:
+					default:
+					}
+				}
 			case <-ctx.Done():
 				// Subscriber cancelled or resource is shutting down. We're not requiring
 				// the subscriber to drain the channel, so we're marking the event done here

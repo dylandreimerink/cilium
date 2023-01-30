@@ -52,15 +52,6 @@ const (
 	serviceNameLabel      = "io.kubernetes.service.name"
 )
 
-var (
-	// eventsOpts are the options used with resource's Events()
-	eventsOpts = resource.WithRateLimiter(
-		// This rate limiter will retry in the following pattern
-		// 250ms, 500ms, 1s, 2s, 4s, 8s, 16s, 32s, .... max 5m
-		workqueue.NewItemExponentialFailureRateLimiter(250*time.Millisecond, 5*time.Minute),
-	)
-)
-
 func newLBIPAM(params LBIPAMParams) *LBIPAM {
 	if !params.Clientset.IsEnabled() {
 		return nil
@@ -116,6 +107,7 @@ type LBIPAM struct {
 
 	// Only used during testing.
 	initDoneCallbacks []func()
+	gossipChannel     chan resource.EventGossip
 }
 
 // Start implements hive.HookInterface
@@ -157,7 +149,19 @@ func (ipam *LBIPAM) Run(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	poolChan := ipam.poolResource.Events(ctx, eventsOpts)
+	// eventsOpts are the options used with resource's Events()
+	eventsOpts := []resource.EventsOpt{
+		resource.WithRateLimiter(
+			// This rate limiter will retry in the following pattern
+			// 250ms, 500ms, 1s, 2s, 4s, 8s, 16s, 32s, .... max 5m
+			workqueue.NewItemExponentialFailureRateLimiter(250*time.Millisecond, 5*time.Minute),
+		)}
+
+	if ipam.gossipChannel != nil {
+		eventsOpts = append(eventsOpts, resource.WithGossip(ipam.gossipChannel))
+	}
+
+	poolChan := ipam.poolResource.Events(ctx, eventsOpts...)
 
 	ipam.logger.Info("LB-IPAM initializing")
 
@@ -189,7 +193,7 @@ func (ipam *LBIPAM) Run(ctx context.Context) {
 		}
 	}
 
-	svcChan := ipam.svcResource.Events(ctx, eventsOpts)
+	svcChan := ipam.svcResource.Events(ctx, eventsOpts...)
 
 	for event := range svcChan {
 		if event.Kind == resource.Sync {
@@ -289,6 +293,13 @@ func (ipam *LBIPAM) handleServiceEvent(ctx context.Context, event resource.Event
 // Note: mainly used in the integration tests.
 func (ipam *LBIPAM) RegisterOnReady(cb func()) {
 	ipam.initDoneCallbacks = append(ipam.initDoneCallbacks, cb)
+}
+
+// RegisterGossipChannel registers a channel which will get notified when a event has been received by LBIPAM and when
+// an event has been marked as Done. This us used to detect when this module is "done" so integration tests
+// can make their assertions.
+func (ipam *LBIPAM) RegisterGossipChannel(ch chan resource.EventGossip) {
+	ipam.gossipChannel = ch
 }
 
 func (ipam *LBIPAM) poolOnUpsert(ctx context.Context, k resource.Key, pool *cilium_api_v2alpha1.CiliumLoadBalancerIPPool) error {

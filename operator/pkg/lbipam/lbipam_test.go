@@ -15,6 +15,7 @@ import (
 	k8s_testing "k8s.io/client-go/testing"
 
 	cilium_api_v2alpha1 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2alpha1"
+	"github.com/cilium/cilium/pkg/k8s/resource"
 	slim_core_v1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
 	slim_meta_v1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
 )
@@ -27,36 +28,42 @@ func TestMain(m *testing.M) {
 // internally disables one of the pools, and notifies the user via a status update.
 // Next, we update the conflicting pool to remove the offending range, this should re-enable the pool.
 func TestConflictResolution(t *testing.T) {
+	gossipChan := make(chan resource.EventGossip)
+	defer close(gossipChan)
+
 	poolB := mkPool(poolBUID, "pool-b", []string{"10.0.10.0/24", "FF::0/48"})
 	poolB.CreationTimestamp = meta_v1.Date(2022, 10, 16, 13, 30, 00, 0, time.UTC)
 	fixture := mkTestFixture([]*cilium_api_v2alpha1.CiliumLoadBalancerIPPool{
 		mkPool(poolAUID, "pool-a", []string{"10.0.10.0/24"}),
 		poolB,
-	}, true, false, nil)
-
-	await := fixture.AwaitPool(func(action k8s_testing.Action) bool {
-		if action.GetResource() != poolResource || action.GetVerb() != "patch" {
-			return false
-		}
-
-		pool := fixture.PatchedPool(action)
-
-		if pool.Name != "pool-b" {
-			return false
-		}
-
-		if !isPoolConflicting(pool) {
-			return false
-		}
-
-		return true
-	}, time.Second)
+	}, true, false, nil, gossipChan)
 
 	go fixture.hive.Start(context.Background())
 	defer fixture.hive.Stop(context.Background())
 
-	if await.Block() {
-		t.Fatal("Pool B has not been marked conflicting")
+	// Wait until all events are processed
+	for gossip := range gossipChan {
+		if gossip.Done && gossip.QueueLength == 0 {
+			break
+		}
+	}
+
+	poolA, err := fixture.poolClient.Get(context.Background(), "pool-a", meta_v1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	poolB, err = fixture.poolClient.Get(context.Background(), "pool-b", meta_v1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if isPoolConflicting(poolA) {
+		t.Fatal("Pool A should not be conflicting")
+	}
+
+	if !isPoolConflicting(poolB) {
+		t.Fatal("Pool B should be conflicting")
 	}
 
 	// All ranges of a conflicting pool must be disabled
@@ -68,29 +75,6 @@ func TestConflictResolution(t *testing.T) {
 	}
 
 	// Phase 2, resolving the conflict
-
-	await = fixture.AwaitPool(func(action k8s_testing.Action) bool {
-		if action.GetResource() != poolResource || action.GetVerb() != "patch" {
-			return false
-		}
-
-		pool := fixture.PatchedPool(action)
-
-		if pool.Name != "pool-b" {
-			return false
-		}
-
-		if isPoolConflicting(pool) {
-			return false
-		}
-
-		return true
-	}, time.Second)
-
-	poolB, err := fixture.poolClient.Get(context.Background(), "pool-b", meta_v1.GetOptions{})
-	if err != nil {
-		t.Fatal(poolB)
-	}
 
 	// Remove the conflicting range
 	poolB.Spec.Cidrs = []cilium_api_v2alpha1.CiliumLoadBalancerIPPoolCIDRBlock{
@@ -104,8 +88,29 @@ func TestConflictResolution(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if await.Block() {
-		t.Fatal("Pool b has not de-conflicted")
+	// Wait until all events are processed
+	for gossip := range gossipChan {
+		if gossip.Done && gossip.QueueLength == 0 {
+			break
+		}
+	}
+
+	poolA, err = fixture.poolClient.Get(context.Background(), "pool-a", meta_v1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	poolB, err = fixture.poolClient.Get(context.Background(), "pool-b", meta_v1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if isPoolConflicting(poolA) {
+		t.Fatal("Pool A should not be conflicting")
+	}
+
+	if isPoolConflicting(poolB) {
+		t.Fatal("Pool B should not be conflicting")
 	}
 }
 
@@ -116,7 +121,7 @@ func TestPoolInternalConflict(t *testing.T) {
 	poolA := mkPool(poolAUID, "pool-a", []string{"10.0.10.0/24", "10.0.10.64/28"})
 	fixture := mkTestFixture([]*cilium_api_v2alpha1.CiliumLoadBalancerIPPool{
 		poolA,
-	}, true, false, nil)
+	}, true, false, nil, nil)
 
 	await := fixture.AwaitPool(func(action k8s_testing.Action) bool {
 		if action.GetResource() != poolResource || action.GetVerb() != "patch" {
@@ -179,7 +184,7 @@ func TestPoolInternalConflict(t *testing.T) {
 func TestAllocHappyPath(t *testing.T) {
 	fixture := mkTestFixture([]*cilium_api_v2alpha1.CiliumLoadBalancerIPPool{
 		mkPool(poolAUID, "pool-a", []string{"10.0.10.0/24", "FF::0/48"}),
-	}, true, true, nil)
+	}, true, true, nil, nil)
 
 	// Initially request only an IPv4
 	policy := slim_core_v1.IPFamilyPolicySingleStack
@@ -322,7 +327,7 @@ func TestAllocHappyPath(t *testing.T) {
 func TestServiceDelete(t *testing.T) {
 	fixture := mkTestFixture([]*cilium_api_v2alpha1.CiliumLoadBalancerIPPool{
 		mkPool(poolAUID, "pool-a", []string{"10.0.10.0/24"}),
-	}, true, true, nil)
+	}, true, true, nil, nil)
 
 	fixture.coreCS.Tracker().Add(
 		&slim_core_v1.Service{
@@ -391,7 +396,7 @@ func TestServiceDelete(t *testing.T) {
 func TestReallocOnInit(t *testing.T) {
 	fixture := mkTestFixture([]*cilium_api_v2alpha1.CiliumLoadBalancerIPPool{
 		mkPool(poolAUID, "pool-a", []string{"10.0.10.0/24"}),
-	}, true, true, nil)
+	}, true, true, nil, nil)
 
 	// Initially request only an IPv4
 	policy := slim_core_v1.IPFamilyPolicySingleStack
@@ -471,7 +476,7 @@ func TestAllocOnInit(t *testing.T) {
 		mkPool(poolAUID, "pool-a", []string{"10.0.10.0/24"}),
 	}, true, true, func() {
 		close(initDone)
-	})
+	}, nil)
 
 	policy := slim_core_v1.IPFamilyPolicySingleStack
 	fixture.coreCS.Tracker().Add(
@@ -561,7 +566,7 @@ func TestPoolSelectorBasic(t *testing.T) {
 
 	fixture := mkTestFixture([]*cilium_api_v2alpha1.CiliumLoadBalancerIPPool{
 		poolA,
-	}, true, true, nil)
+	}, true, true, nil, nil)
 
 	go fixture.hive.Start(context.Background())
 	defer fixture.hive.Stop(context.Background())
@@ -691,7 +696,7 @@ func TestPoolSelectorNamespace(t *testing.T) {
 
 	fixture := mkTestFixture([]*cilium_api_v2alpha1.CiliumLoadBalancerIPPool{
 		poolA,
-	}, true, true, nil)
+	}, true, true, nil, nil)
 
 	go fixture.hive.Start(context.Background())
 	defer fixture.hive.Stop(context.Background())
@@ -816,7 +821,7 @@ func TestChangeServiceType(t *testing.T) {
 		mkPool(poolAUID, "pool-a", []string{"10.0.10.0/24"}),
 	}, true, true, func() {
 		close(initDone)
-	})
+	}, nil)
 
 	// This existing ClusterIP service should be ignored
 	fixture.coreCS.Tracker().Add(
@@ -955,7 +960,7 @@ func TestRangesFull(t *testing.T) {
 		mkPool(poolAUID, "pool-a", []string{"10.0.10.123/32", "FF::123/128"}),
 	}, true, true, func() {
 		close(initDone)
-	})
+	}, nil)
 
 	policy := slim_core_v1.IPFamilyPolicySingleStack
 	fixture.coreCS.Tracker().Add(
@@ -1064,7 +1069,7 @@ func TestRangesFull(t *testing.T) {
 func TestRequestIPs(t *testing.T) {
 	fixture := mkTestFixture([]*cilium_api_v2alpha1.CiliumLoadBalancerIPPool{
 		mkPool(poolAUID, "pool-a", []string{"10.0.10.0/24"}),
-	}, true, true, nil)
+	}, true, true, nil, nil)
 
 	fixture.coreCS.Tracker().Add(
 		&slim_core_v1.Service{
@@ -1237,7 +1242,7 @@ func TestRequestIPs(t *testing.T) {
 func TestAddPool(t *testing.T) {
 	fixture := mkTestFixture([]*cilium_api_v2alpha1.CiliumLoadBalancerIPPool{
 		mkPool(poolAUID, "pool-a", []string{"10.0.10.0/24"}),
-	}, true, true, nil)
+	}, true, true, nil, nil)
 
 	fixture.coreCS.Tracker().Add(
 		&slim_core_v1.Service{
@@ -1308,7 +1313,7 @@ func TestAddRange(t *testing.T) {
 	poolA := mkPool(poolAUID, "pool-a", []string{"10.0.10.0/24"})
 	fixture := mkTestFixture([]*cilium_api_v2alpha1.CiliumLoadBalancerIPPool{
 		poolA,
-	}, true, true, nil)
+	}, true, true, nil, nil)
 
 	fixture.coreCS.Tracker().Add(
 		&slim_core_v1.Service{
@@ -1383,7 +1388,7 @@ func TestDisablePool(t *testing.T) {
 	poolA := mkPool(poolAUID, "pool-a", []string{"10.0.10.0/24"})
 	fixture := mkTestFixture([]*cilium_api_v2alpha1.CiliumLoadBalancerIPPool{
 		poolA,
-	}, true, true, nil)
+	}, true, true, nil, nil)
 
 	fixture.coreCS.Tracker().Add(
 		&slim_core_v1.Service{
@@ -1519,7 +1524,7 @@ func TestPoolDelete(t *testing.T) {
 		mkPool(poolBUID, "pool-b", []string{"10.0.20.0/24"}),
 	}, true, true, func() {
 		close(initDone)
-	})
+	}, nil)
 
 	fixture.coreCS.Tracker().Add(
 		&slim_core_v1.Service{
@@ -1605,7 +1610,7 @@ func TestRangeDelete(t *testing.T) {
 	poolA := mkPool(poolAUID, "pool-a", []string{"10.0.10.0/24"})
 	fixture := mkTestFixture([]*cilium_api_v2alpha1.CiliumLoadBalancerIPPool{
 		poolA,
-	}, true, true, nil)
+	}, true, true, nil, nil)
 
 	fixture.coreCS.Tracker().Add(
 		&slim_core_v1.Service{
@@ -1880,7 +1885,7 @@ func TestRemoveServiceLabel(t *testing.T) {
 	}
 	fixture := mkTestFixture([]*cilium_api_v2alpha1.CiliumLoadBalancerIPPool{
 		poolA,
-	}, true, true, nil)
+	}, true, true, nil, nil)
 
 	svc1 := &slim_core_v1.Service{
 		ObjectMeta: slim_meta_v1.ObjectMeta{
@@ -1961,7 +1966,7 @@ func TestRequestIPWithMismatchedLabel(t *testing.T) {
 	}
 	fixture := mkTestFixture([]*cilium_api_v2alpha1.CiliumLoadBalancerIPPool{
 		poolA,
-	}, true, true, nil)
+	}, true, true, nil, nil)
 
 	fixture.coreCS.Tracker().Add(
 		&slim_core_v1.Service{
@@ -2004,7 +2009,7 @@ func TestRemoveRequestedIP(t *testing.T) {
 	poolA := mkPool(poolAUID, "pool-a", []string{"10.0.10.0/24"})
 	fixture := mkTestFixture([]*cilium_api_v2alpha1.CiliumLoadBalancerIPPool{
 		poolA,
-	}, true, true, nil)
+	}, true, true, nil, nil)
 
 	svc1 := &slim_core_v1.Service{
 		ObjectMeta: slim_meta_v1.ObjectMeta{
@@ -2093,7 +2098,7 @@ func TestNonMatchingLBClass(t *testing.T) {
 	poolA := mkPool(poolAUID, "pool-a", []string{"10.0.10.0/24"})
 	fixture := mkTestFixture([]*cilium_api_v2alpha1.CiliumLoadBalancerIPPool{
 		poolA,
-	}, true, true, nil)
+	}, true, true, nil, nil)
 
 	lbClass := "net.example/some-other-class"
 	fixture.coreCS.Tracker().Add(
@@ -2137,7 +2142,7 @@ func TestChangePoolSelector(t *testing.T) {
 	}
 	fixture := mkTestFixture([]*cilium_api_v2alpha1.CiliumLoadBalancerIPPool{
 		poolA,
-	}, true, true, nil)
+	}, true, true, nil, nil)
 
 	fixture.coreCS.Tracker().Add(
 		&slim_core_v1.Service{

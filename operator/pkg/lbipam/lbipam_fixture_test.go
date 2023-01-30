@@ -65,7 +65,12 @@ type LBIPAMTestFixture struct {
 	svcReactor  func(action k8s_testing.Action)
 }
 
-func mkTestFixture(pools []*cilium_api_v2alpha1.CiliumLoadBalancerIPPool, ipv4, ipv6 bool, initDone func()) *LBIPAMTestFixture {
+func mkTestFixture(
+	pools []*cilium_api_v2alpha1.CiliumLoadBalancerIPPool,
+	ipv4, ipv6 bool,
+	initDone func(),
+	eventsGossip chan resource.EventGossip,
+) *LBIPAMTestFixture {
 	fixture := &LBIPAMTestFixture{}
 
 	// Convert exact pool types to runtime.Object interface so we can insert them.
@@ -149,6 +154,9 @@ func mkTestFixture(pools []*cilium_api_v2alpha1.CiliumLoadBalancerIPPool, ipv4, 
 			fixture.lbIPAM = lbIPAM
 			if initDone != nil {
 				lbIPAM.RegisterOnReady(initDone)
+			}
+			if eventsGossip != nil {
+				lbIPAM.RegisterGossipChannel(eventsGossip)
 			}
 		}),
 
