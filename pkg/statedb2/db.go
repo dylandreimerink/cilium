@@ -6,11 +6,15 @@ package statedb2
 import (
 	"errors"
 	"fmt"
+	"runtime"
+	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/cilium/cilium/pkg/hive"
 	"github.com/cilium/cilium/pkg/lock"
 	iradix "github.com/hashicorp/go-immutable-radix/v2"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // DB provides an in-memory transaction database built on top of immutable radix
@@ -84,14 +88,16 @@ type DB struct {
 	root      atomic.Pointer[iradix.Tree[tableEntry]]
 	gcTrigger chan struct{} // trigger for graveyard garbage collection
 	gcExited  chan struct{}
+	metrics   *Metrics
 }
 
-func NewDB(tables []TableMeta) (*DB, error) {
+func NewDB(tables []TableMeta, metrics *Metrics) (*DB, error) {
 	txn := iradix.New[tableEntry]().Txn()
 	db := &DB{
 		tables:    make(map[TableName]TableMeta),
 		gcTrigger: make(chan struct{}, 1),
 		gcExited:  make(chan struct{}),
+		metrics:   metrics,
 	}
 	for _, t := range tables {
 		name := t.Name()
@@ -136,28 +142,63 @@ func (db *DB) ReadTxn() ReadTxn {
 //
 // WriteTxn is not thread-safe!
 func (db *DB) WriteTxn(table TableMeta, tables ...TableMeta) WriteTxn {
+	var callerPkg string
+	pc, _, _, ok := runtime.Caller(1)
+	if ok {
+		f := runtime.FuncForPC(pc)
+		if f != nil {
+			callerPkg = f.Name()
+			callerPkg, _ = strings.CutPrefix(callerPkg, "github.com/cilium/cilium/")
+			callerPkg = strings.SplitN(callerPkg, ".", 2)[0]
+		} else {
+			callerPkg = "unknown"
+		}
+	} else {
+		callerPkg = "unknown"
+	}
+
 	allTables := append(tables, table)
 	smus := lock.SortableMutexes{}
 	for _, table := range allTables {
 		smus = append(smus, table.sortableMutex())
 	}
+	lockAt := time.Now()
 	smus.Lock()
+	acquiredAt := time.Now()
 
 	rootReadTxn := db.root.Load().Txn()
 	tableEntries := make(map[TableName]*tableEntry, len(tables))
+	var tableNames []string
 	for _, table := range allTables {
 		tableEntry, ok := rootReadTxn.Get(table.tableKey())
 		if !ok {
 			panic("BUG: Table '" + table.Name() + "' not found")
 		}
 		tableEntries[table.Name()] = &tableEntry
+		tableNames = append(tableNames, table.Name())
+
+		db.metrics.TableContention.With(prometheus.Labels{
+			"table": table.Name(),
+		}).Set(table.sortableMutex().Contention().Seconds())
 	}
+
+	db.metrics.WriteTxnAcquisition.With(prometheus.Labels{
+		"holder-package": callerPkg,
+		"tables":         strings.Join(tableNames, "+"),
+	}).Observe(acquiredAt.Sub(lockAt).Seconds())
+
 	return &txn{
-		db:          db,
-		rootReadTxn: rootReadTxn,
-		tables:      tableEntries,
-		writeTxns:   make(map[tableIndex]*iradix.Txn[object]),
-		smus:        smus,
+		db:                     db,
+		rootReadTxn:            rootReadTxn,
+		tables:                 tableEntries,
+		writeTxns:              make(map[tableIndex]*iradix.Txn[object]),
+		smus:                   smus,
+		acquiredAt:             acquiredAt,
+		metrics:                db.metrics,
+		tableNames:             strings.Join(tableNames, "+"),
+		holderPackage:          callerPkg,
+		pendingObjectDeltas:    make(map[string]float64),
+		pendingGraveyardDeltas: make(map[string]float64),
 	}
 }
 

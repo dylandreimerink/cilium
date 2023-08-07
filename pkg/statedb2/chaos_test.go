@@ -63,7 +63,7 @@ var (
 	tableChaos4, _ = statedb2.NewTable[chaos4]("chaos4", mkIDIndex[chaos4]())
 	tableChaos5, _ = statedb2.NewTable[chaos5]("chaos5", mkIDIndex[chaos5]())
 	chaosTables    = []statedb2.TableMeta{tableChaos1, tableChaos2, tableChaos3, tableChaos4, tableChaos5}
-	chaosDB, _     = statedb2.NewDB(chaosTables)
+	chaosDB, _     = statedb2.NewDB(chaosTables, statedb2.NewMetrics())
 )
 
 func randomSubset[T any](xs []T) []T {
