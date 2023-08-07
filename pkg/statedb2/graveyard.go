@@ -48,6 +48,7 @@ func graveyardWorker(db *DB) {
 					lowWatermark = rev
 				}
 			}
+
 			// Find objects to be deleted by iterating over the graveyard revision index up
 			// to the low watermark.
 			indexTree, ok := txn.getTable(string(name)).indexes.Get([]byte(GraveyardRevisionIndex))

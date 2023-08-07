@@ -27,7 +27,11 @@ var Hive = hive.New(
 	controlCell,
 
 	// Datapath simulation to reconcile the desired state to the datapath.
-	reconcilerCell,
+	//reconcilerCell,
+
+	// Variation of the reconciler to use a work queue to allow retries of
+	// individual objects. Much less efficient.
+	reconcilerWorkqueueCell,
 
 	// Report the health status to stdout once a second.
 	cell.Invoke(reportHealth),

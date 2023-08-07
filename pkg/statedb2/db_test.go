@@ -534,7 +534,6 @@ func BenchmarkDB_DeleteTracker(b *testing.B) {
 			require.NoError(b, err)
 		}
 		txn.Commit()
-		b.ResetTimer()
 
 		// Start the timer and delete all objects to time the cost for
 		// deletion tracking.
@@ -555,7 +554,7 @@ func BenchmarkDB_DeleteTracker(b *testing.B) {
 
 		require.Eventually(b,
 			db.graveyardIsEmpty,
-			10*time.Millisecond,
+			time.Second,
 			100*time.Millisecond,
 			"graveyard not garbage collected")
 	})
@@ -622,5 +621,59 @@ func BenchmarkDB_FullIteration(b *testing.B) {
 			require.Equal(b, obj.ID, i)
 			i++
 		}
+	})
+}
+
+func BenchmarkDB_WorkQueue(b *testing.B) {
+	testWithDB(b, false, func(db *DB, table Table[testObject]) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		txn := db.WriteTxn(table)
+
+		// Start tracking events
+		events, err := table.WorkQueue(txn, ctx)
+		require.NoError(b, err)
+
+		// Create b.N objects
+		require.NoError(b, err)
+		for i := 0; i < b.N; i++ {
+			_, _, err := table.Insert(txn, testObject{ID: uint64(i), Tags: nil})
+			require.NoError(b, err)
+		}
+		txn.Commit()
+
+		// Pull the upserts
+		for i := 0; i < b.N; i++ {
+			ev := <-events
+			require.Equal(b, Upsert, ev.Kind)
+			require.EqualValues(b, i, ev.Object.ID)
+			ev.Done(nil)
+		}
+
+		txn = db.WriteTxn(table)
+		table.DeleteAll(txn)
+		txn.Commit()
+
+		// Pull the deletions
+		for i := 0; i < b.N; i++ {
+			ev := <-events
+			require.Equal(b, Delete, ev.Kind)
+			require.EqualValues(b, i, ev.Object.ID)
+			ev.Done(nil)
+		}
+		b.StopTimer()
+
+		cancel()
+		for ev := range events {
+			b.Fatalf("Unexpected event: %v", ev)
+		}
+
+		// Check that graveyard is gc'd
+		require.Eventually(b,
+			db.graveyardIsEmpty,
+			5*time.Second,
+			100*time.Millisecond,
+			"graveyard not garbage collected")
 	})
 }

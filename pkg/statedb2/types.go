@@ -4,12 +4,12 @@
 package statedb2
 
 import (
+	"context"
 	"io"
-
-	"github.com/hashicorp/go-immutable-radix/v2"
 
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/statedb2/index"
+	iradix "github.com/hashicorp/go-immutable-radix/v2"
 )
 
 type (
@@ -82,6 +82,10 @@ type Table[Obj any] interface {
 	// DeleteTracker creates a new delete tracker for the table
 	// starting from the given revision.
 	DeleteTracker(txn WriteTxn, trackerName string) (*DeleteTracker[Obj], error)
+
+	// WorkQueue creates an observable stream of upsert and delete events for the
+	// table that can be individually retried.
+	WorkQueue(txn WriteTxn, ctx context.Context) (<-chan Event[Obj], error)
 }
 
 // TableMeta provides information about the table that is independent of
@@ -99,6 +103,8 @@ type Iterator[Obj any] interface {
 	// Next returns the next object its revision if ok is true, otherwise
 	// zero values to mean that the iteration has finished.
 	Next() (obj Obj, rev Revision, ok bool)
+
+	next() (key index.Key, obj object, ok bool)
 }
 
 type ReadTxn interface {

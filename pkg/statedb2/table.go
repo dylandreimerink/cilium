@@ -4,6 +4,7 @@
 package statedb2
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -205,6 +206,10 @@ func (t *genTable[Obj]) DeleteTracker(txn WriteTxn, trackerName string) (*Delete
 		return nil, err
 	}
 	return dt, nil
+}
+
+func (t *genTable[Obj]) WorkQueue(txn WriteTxn, ctx context.Context) (<-chan Event[Obj], error) {
+	return newWorkQueue(txn, t, ctx)
 }
 
 func (t *genTable[Obj]) sortableMutex() lock.SortableMutex {

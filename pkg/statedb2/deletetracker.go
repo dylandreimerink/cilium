@@ -72,7 +72,11 @@ func (dt *DeleteTracker[Obj]) Close() {
 // is returned by the function the iteration is stopped and the revision at which
 // processing failed and the error is returned. The caller can then retry processing
 // again from this revision by providing it as the 'minRevision'.
-func (dt *DeleteTracker[Obj]) Process(txn ReadTxn, minRevision Revision, processFn func(obj Obj, deleted bool, rev Revision) error) (Revision, <-chan struct{}, error) {
+func (dt *DeleteTracker[Obj]) Process(
+	txn ReadTxn,
+	minRevision Revision,
+	processFn func(obj Obj, deleted bool, rev Revision) error,
+) (Revision, <-chan struct{}, error) {
 	upTo := dt.table.Revision(txn)
 
 	// Get all new and updated objects with revision number equal or
@@ -87,19 +91,19 @@ func (dt *DeleteTracker[Obj]) Process(txn ReadTxn, minRevision Revision, process
 	// Combine the iterators into one. This can be done as insert and delete
 	// both assign the object a new fresh monotonically increasing revision
 	// number.
-	iter := NewDualIterator[Obj](deletedIter, updatedIter)
+	iter := newDualIterator[Obj](deletedIter, updatedIter)
 
-	for obj, rev, isDeleted, ok := iter.Next(); ok; obj, rev, isDeleted, ok = iter.Next() {
-		err := processFn(obj, isDeleted, rev)
+	for _, obj, isDeleted, ok := iter.Next(); ok; _, obj, isDeleted, ok = iter.Next() {
+		err := processFn(obj.data.(Obj), isDeleted, obj.revision)
 		if err != nil {
 			// Mark deleted objects processed up to previous revision since we may
 			// not have processed all objects with this revision fully yet.
-			dt.Mark(txn.getTxn(), rev-1)
+			dt.Mark(txn.getTxn(), obj.revision-1)
 
 			// Processing failed, stop here and try again from this same revision.
 			closedWatch := make(chan struct{})
 			close(closedWatch)
-			return rev, closedWatch, err
+			return obj.revision, closedWatch, err
 		}
 
 	}

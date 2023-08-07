@@ -3,7 +3,11 @@
 
 package statedb2
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/cilium/cilium/pkg/statedb2/index"
+)
 
 func Collect[Obj any](iter Iterator[Obj]) []Obj {
 	objs := []Obj{}
@@ -24,9 +28,17 @@ func ProcessEach[Obj any, It Iterator[Obj]](iter It, fn func(Obj, Revision) erro
 	return
 }
 
+type objectIterator interface {
+	Next() ([]byte, object, bool)
+}
+
 // iterator adapts the "any" object iterator to a typed object.
 type iterator[Obj any] struct {
-	iter interface{ Next() ([]byte, object, bool) }
+	iter objectIterator
+}
+
+func (it *iterator[Obj]) next() (key index.Key, obj object, ok bool) {
+	return it.iter.Next()
 }
 
 func (it *iterator[Obj]) Next() (obj Obj, revision uint64, ok bool) {
@@ -38,38 +50,39 @@ func (it *iterator[Obj]) Next() (obj Obj, revision uint64, ok bool) {
 	return
 }
 
-func NewDualIterator[Obj any](left, right Iterator[Obj]) *DualIterator[Obj] {
-	return &DualIterator[Obj]{
-		left:  iterState[Obj]{iter: left},
-		right: iterState[Obj]{iter: right},
+func newDualIterator[Obj any](left, right Iterator[Obj]) *dualIterator {
+	return &dualIterator{
+		left:  iterState{iter: left},
+		right: iterState{iter: right},
 	}
 }
 
-type iterState[Obj any] struct {
-	iter Iterator[Obj]
-	obj  Obj
-	rev  Revision
-	ok   bool
+type iterState struct {
+	iter interface {
+		next() (index.Key, object, bool)
+	}
+	key index.Key
+	obj object
+	ok  bool
 }
 
-// DualIterator allows iterating over two iterators in revision order.
+// dualIterator allows iterating over two iterators in revision order.
 // Meant to be used for combined iteration of LowerBound(ByRevision)
 // and Deleted().
-type DualIterator[Obj any] struct {
-	left  iterState[Obj]
-	right iterState[Obj]
+type dualIterator struct {
+	left, right iterState
 }
 
-func (it *DualIterator[Obj]) Next() (obj Obj, revision uint64, fromLeft, ok bool) {
+func (it *dualIterator) Next() (key index.Key, obj object, fromLeft, ok bool) {
 	// Advance the iterators
 	if !it.left.ok && it.left.iter != nil {
-		it.left.obj, it.left.rev, it.left.ok = it.left.iter.Next()
+		it.left.key, it.left.obj, it.left.ok = it.left.iter.next()
 		if !it.left.ok {
 			it.left.iter = nil
 		}
 	}
 	if !it.right.ok && it.right.iter != nil {
-		it.right.obj, it.right.rev, it.right.ok = it.right.iter.Next()
+		it.right.key, it.right.obj, it.right.ok = it.right.iter.next()
 		if !it.right.ok {
 			it.right.iter = nil
 		}
@@ -82,16 +95,16 @@ func (it *DualIterator[Obj]) Next() (obj Obj, revision uint64, fromLeft, ok bool
 		return
 	case it.left.ok && !it.right.ok:
 		it.left.ok = false
-		return it.left.obj, it.left.rev, true, true
+		return it.left.key, it.left.obj, true, true
 	case it.right.ok && !it.left.ok:
 		it.right.ok = false
-		return it.right.obj, it.right.rev, false, true
-	case it.left.rev <= it.right.rev:
+		return it.right.key, it.right.obj, false, true
+	case it.left.obj.revision <= it.right.obj.revision:
 		it.left.ok = false
-		return it.left.obj, it.left.rev, true, true
-	case it.right.rev <= it.left.rev:
+		return it.left.key, it.left.obj, true, true
+	case it.right.obj.revision <= it.left.obj.revision:
 		it.right.ok = false
-		return it.right.obj, it.right.rev, false, true
+		return it.right.key, it.right.obj, false, true
 	default:
 		panic(fmt.Sprintf("BUG: Unhandled case: %+v", it))
 	}
