@@ -34,7 +34,7 @@ func graveyardWorker(db *DB) {
 		// Throttle garbage collection.
 		limiter.Wait(context.Background())
 
-		cleaningTimes := make(map[string]*spanstat.SpanStat)
+		iterationTimes := make(map[string]*spanstat.SpanStat)
 
 		type deadObjectRevisionKey = []byte
 		toBeDeleted := map[TableMeta][]deadObjectRevisionKey{}
@@ -43,7 +43,7 @@ func graveyardWorker(db *DB) {
 		txn := db.ReadTxn().getTxn()
 		tableIter := txn.rootReadTxn.Root().Iterator()
 		for name, table, ok := tableIter.Next(); ok; name, table, ok = tableIter.Next() {
-			cleaningTimes[string(name)] = spanstat.Start()
+			iterationTimes[string(name)] = spanstat.Start()
 
 			// Find the low watermark
 			lowWatermark := table.revision
@@ -72,17 +72,19 @@ func graveyardWorker(db *DB) {
 				toBeDeleted[table.meta] = append(toBeDeleted[table.meta], key)
 			}
 
-			cleaningTimes[string(name)].End(true)
+			iterationTimes[string(name)].End(true)
 		}
 
 		if len(toBeDeleted) == 0 {
-			for tableName, stat := range cleaningTimes {
+			for tableName, stat := range iterationTimes {
 				db.metrics.TableGraveyardCleaningDuration.With(prometheus.Labels{
 					"table": tableName,
 				}).Observe(stat.Total().Seconds())
 			}
 			continue
 		}
+
+		cleaningTimes := make(map[string]*spanstat.SpanStat)
 
 		// Dead objects found, do a write transaction against all tables with dead objects in them.
 		tablesToModify := maps.Keys(toBeDeleted)
@@ -103,10 +105,15 @@ func graveyardWorker(db *DB) {
 		}
 		txn.Commit()
 
-		for tableName, stat := range cleaningTimes {
+		for tableName, iterationStat := range iterationTimes {
+			total := iterationStat.Total()
+			if cleaningStat, ok := cleaningTimes[tableName]; ok {
+				total += cleaningStat.Total()
+			}
+
 			db.metrics.TableGraveyardCleaningDuration.With(prometheus.Labels{
 				"table": tableName,
-			}).Observe(stat.Total().Seconds())
+			}).Observe(total.Seconds())
 		}
 	}
 }

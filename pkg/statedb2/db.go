@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -182,6 +183,7 @@ func (db *DB) WriteTxn(table TableMeta, tables ...TableMeta) WriteTxn {
 		}).Set(table.sortableMutex().Contention().Seconds())
 	}
 
+	sort.Strings(tableNames)
 	db.metrics.WriteTxnAcquisition.With(prometheus.Labels{
 		"holder-package": callerPkg,
 		"tables":         strings.Join(tableNames, "+"),
@@ -199,6 +201,7 @@ func (db *DB) WriteTxn(table TableMeta, tables ...TableMeta) WriteTxn {
 		holderPackage:          callerPkg,
 		pendingObjectDeltas:    make(map[string]float64),
 		pendingGraveyardDeltas: make(map[string]float64),
+		pendingTableRevisions:  make(map[string]float64),
 	}
 }
 

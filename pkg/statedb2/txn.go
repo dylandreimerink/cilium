@@ -29,6 +29,7 @@ type txn struct {
 	metrics                *Metrics                           // statedb metrics
 	pendingObjectDeltas    map[TableName]float64              // the change in the number of objects made by this txn
 	pendingGraveyardDeltas map[TableName]float64              // the change in the number of graveyard objects made by this txn
+	pendingTableRevisions  map[TableName]float64              // the change in the revision of each table made by this txn
 }
 
 type tableIndex struct {
@@ -130,9 +131,7 @@ func (txn *txn) newRevision(tableName TableName) (Revision, error) {
 		return 0, fmt.Errorf("table %q not locked for writing", tableName)
 	}
 	table.revision++
-	txn.metrics.TableRevision.With(prometheus.Labels{
-		"table": tableName,
-	}).Set(float64(table.revision))
+	txn.pendingTableRevisions[tableName]++
 	return table.revision, nil
 }
 
@@ -349,11 +348,25 @@ func (txn *txn) Commit() {
 	rootTxn.Notify()
 
 	txn.smus.Unlock()
+
 	for name, delta := range txn.pendingObjectDeltas {
 		db.metrics.TableObjectCount.With(prometheus.Labels{
 			"table": name,
 		}).Add(delta)
 	}
+
+	for name, delta := range txn.pendingGraveyardDeltas {
+		db.metrics.TableGraveyardObjects.With(prometheus.Labels{
+			"table": name,
+		}).Add(delta)
+	}
+
+	for name, delta := range txn.pendingTableRevisions {
+		db.metrics.TableRevision.With(prometheus.Labels{
+			"table": name,
+		}).Add(delta)
+	}
+
 	*txn = zeroTxn
 }
 
