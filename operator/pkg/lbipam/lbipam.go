@@ -681,7 +681,19 @@ func (ipam *LBIPAM) handleDeletedService(svc *slim_core_v1.Service) {
 	}
 
 	for _, alloc := range sv.AllocatedIPs {
-		alloc.Origin.alloc.Free(alloc.IP)
+		used_by_other := false
+		done:
+		for _, serviceView := range ipam.serviceStore.satisfied {
+			for _, other_alloc := s.AllocatedIPs {
+				if other_alloc.IP == alloc.IP {
+					used_by_other = true
+					break done
+				}
+			}
+		}
+		if used_by_other == false {
+			alloc.Origin.alloc.Free(alloc.IP)
+		}
 	}
 
 	ipam.serviceStore.Delete(key)
@@ -739,22 +751,18 @@ func (ipam *LBIPAM) satisfyService(sv *ServiceView) (statusModified bool, err er
 			}
 
 			if _, exists := lbRange.alloc.Get(reqIP); exists {
-				msg := fmt.Sprintf("IP '%s' has already been allocated to another service", reqIP)
-				if ipam.setSVCSatisfiedCondition(sv, false, "already_allocated", msg) {
-					statusModified = true
-				}
-				continue
-			}
+				// As the IP was specifically requested, let's allocate it anyways.
+			} else {
+				ipam.logger.Debugf("Allocate '%s' for '%s'", reqIP.String(), sv.Key.String())
+				err = lbRange.alloc.Alloc(reqIP, true)
+				if err != nil {
+					if errors.Is(err, ipalloc.ErrInUse) {
+						return statusModified, fmt.Errorf("ipalloc.Alloc: %w", err)
+					}
 
-			ipam.logger.Debugf("Allocate '%s' for '%s'", reqIP.String(), sv.Key.String())
-			err = lbRange.alloc.Alloc(reqIP, true)
-			if err != nil {
-				if errors.Is(err, ipalloc.ErrInUse) {
-					return statusModified, fmt.Errorf("ipalloc.Alloc: %w", err)
+					ipam.logger.WithError(err).Error("Unable to allocate IP")
+					continue
 				}
-
-				ipam.logger.WithError(err).Error("Unable to allocate IP")
-				continue
 			}
 
 			sv.AllocatedIPs = append(sv.AllocatedIPs, ServiceViewIP{
