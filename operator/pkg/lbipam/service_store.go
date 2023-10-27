@@ -66,6 +66,12 @@ type ServiceView struct {
 	Generation int64
 	Status     *slim_core_v1.ServiceStatus
 
+  SharingKey string
+  // These required to determine if a service conflicts with another for sharing an ip
+  ExternalTrafficPolicy *slim_core_v1.ServiceExternalTrafficPolicy
+  Ports *[]slim_core_v1.ServicePort
+  Selector *map[string]string
+
 	// The specific IPs requested by the service
 	RequestedIPs []netip.Addr
 	// The IP families requested by the service
@@ -75,6 +81,22 @@ type ServiceView struct {
 	}
 	// The IPs we have allocated for this IP
 	AllocatedIPs []ServiceViewIP
+}
+
+func (sv *ServiceView) isCompatible(osv *ServiceView) bool {
+  // They request the use of different ports (e.g. tcp/80 for one and tcp/443 for the other).
+  for _, port1 := sv.Ports {
+    for _, port2 := osv.Ports {
+      if port1 == port2 {
+        return false
+      }
+    }
+  }
+  // They both use the Cluster external traffic policy, or they both point to the exact same set of pods (i.e. the pod selectors are identical).
+  if !((sv.ExternalTrafficPolicy == slim_core_v1.ServiceExternalTrafficPolicyCluster) && (osv.ExternalTrafficPolicy == sv.ExternalTrafficPolicy)) {
+    return reflect.DeepEqual(sv.Selector, osv.Selector)
+  }
+  return true
 }
 
 func (sv *ServiceView) isSatisfied() bool {

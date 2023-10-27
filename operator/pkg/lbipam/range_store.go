@@ -15,11 +15,13 @@ import (
 type rangesStore struct {
 	ranges       []*LBRange
 	poolToRanges map[string][]*LBRange
+  sharingKeyToServiceViewIP map[string]*ServiceViewIP
 }
 
 func newRangesStore() rangesStore {
 	return rangesStore{
 		poolToRanges: make(map[string][]*LBRange),
+    sharingKeyToServiceViewIP: make(map[string]*ServiceViewIP)
 	}
 }
 
@@ -55,9 +57,14 @@ func (rs *rangesStore) GetRangesForPool(name string) ([]*LBRange, bool) {
 	return ranges, found
 }
 
+func (rs *rangesStore) GetServiceViewIPForSharingKey(sk string) (*ServiceViewIP, bool) {
+  serviceViewIP, found := rs.sharingKeyToServiceViewIP[sk]
+  return serviceViewIP, found
+}
+
 type LBRange struct {
-	// the actual data of which ips have been allocated or not
-	alloc ipalloc.Allocator[bool]
+	// the actual data of which ips have been allocated or not and to what services
+	alloc ipalloc.Allocator[[]*ServiceView]
 	// If true, the LB range has been disabled via the CRD and thus no IPs should be allocated from this range
 	externallyDisabled bool
 	// If true, the LB range has been disabled by us, because it conflicts with other ranges for example.
@@ -68,7 +75,7 @@ type LBRange struct {
 }
 
 func NewLBRange(from, to netip.Addr, pool *cilium_api_v2alpha1.CiliumLoadBalancerIPPool) (*LBRange, error) {
-	alloc, err := ipalloc.NewHashAllocator[bool](from, to, 0)
+	alloc, err := ipalloc.NewHashAllocator[[]*ServiceView](from, to, 0)
 	if err != nil {
 		return nil, fmt.Errorf("new cidr range: %w", err)
 	}

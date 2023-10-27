@@ -48,6 +48,7 @@ const (
 
 	// The annotation LB IPAM will look for when searching for requested IPs
 	ciliumSvcLBIPSAnnotation = "io.cilium/lb-ipam-ips"
+  ciliumSvcLBISKAnnotation = "io.cilium/lb-ipam-sharing-key"
 
 	// The string used in the FieldManager field on update options
 	ciliumFieldManager = "cilium-operator-lb-ipam"
@@ -434,6 +435,10 @@ func (ipam *LBIPAM) handleUpsertService(ctx context.Context, svc *slim_core_v1.S
 	sv.Labels = svcLabels(svc)
 	sv.RequestedFamilies.IPv4, sv.RequestedFamilies.IPv6 = ipam.serviceIPFamilyRequest(svc)
 	sv.RequestedIPs = getSVCRequestedIPs(ipam.logger, svc)
+	sv.SharingKey = getSVCSharingKey(ipam.logger, svc)
+  sv.ExternalTrafficPolicy = svc.ExternalTrafficPolicy.DeepCopy()
+  sv.Ports = svc.Ports.DeepCopy()
+  sv.Selector = svc.Selector.DeepCopy()
 	sv.Status = svc.Status.DeepCopy()
 
 	// Remove any allocation that are no longer valid due to a change in the service spec
@@ -673,6 +678,13 @@ func getSVCRequestedIPs(log logrus.FieldLogger, svc *slim_core_v1.Service) []net
 	})
 }
 
+func getSVCSharingKey(log logrus.FieldLogger, svc *slim_core_v1.Service) string {
+	if annotation := svc.Annotations[ciliumSvcLBISKAnnotation]; annotation != "" {
+		return annotation
+	}
+	return ""
+}
+
 func (ipam *LBIPAM) handleDeletedService(svc *slim_core_v1.Service) {
 	key := resource.NewKey(svc)
 	sv, found, _ := ipam.serviceStore.GetService(key)
@@ -723,6 +735,43 @@ func (ipam *LBIPAM) satisfyServices(ctx context.Context) error {
 
 func (ipam *LBIPAM) satisfyService(sv *ServiceView) (statusModified bool, err error) {
 	if len(sv.RequestedIPs) > 0 {
+    // We check if the service has a sharing key annotation(cilium version).
+    donesharing:
+    if sv.SharingKey != "" {
+      // If it does, we can see if it exists in the `rangeStore` via the index.
+      serviceViewIPPtr, foundServiceViewIP := ipam.rangesStore.GetServiceViewIPForSharingKey(sv.SharingKey)
+      if !foundServiceViewIP || serviceViewIPPtr == nil {
+        break donesharing
+      }
+      serviceViewIP := *serviceViewIPPtr
+      lbRangePtr := serviceViewIP.Origin
+      if lbRangePtr == nil {
+        break donesharing
+      }
+      lbRange := *lbRangePtr
+      // If it exists, we go to the `LBRange` and get the list of `ServiceViews`.
+      serviceViewsPtr, foundServiceViewsPtr := lbRange.alloc.Get(serviceViewIP.IP)
+      if !foundServiceViewsPtr || serviceViewsPtr == nil {
+        break donesharing
+      }
+      serviceViews := *serviceViewsPtr
+      // Check if the ports and external traffic policy of the current service is compatible with the existing `ServiceViews`
+      compatible := true
+      for _, serviceView := range serviceViews {
+        if !(serviceView.isCompatible(sv)) {
+          compatible = false
+          break
+        }
+      }
+      // if it is, add the service view to the list, and satisfy the IP
+      if compatible {
+        sv.AllocatedIPs = append(sv.AllocatedIPs, ServiceViewIP{
+          IP:     serviceViewIP.IP,
+          Origin: lbRange,
+        })
+        append(serviceViews, sv)
+      }
+    }
 		// The service requests specific IPs
 		for _, reqIP := range sv.RequestedIPs {
 			// if we are able to find the requested IP in the list of allocated IPs
@@ -751,7 +800,6 @@ func (ipam *LBIPAM) satisfyService(sv *ServiceView) (statusModified bool, err er
 			}
 
 			if _, exists := lbRange.alloc.Get(reqIP); exists {
-				// As the IP was specifically requested, let's allocate it anyways.
 			} else {
 				ipam.logger.Debugf("Allocate '%s' for '%s'", reqIP.String(), sv.Key.String())
 				err = lbRange.alloc.Alloc(reqIP, true)
@@ -845,6 +893,14 @@ func (ipam *LBIPAM) satisfyService(sv *ServiceView) (statusModified bool, err er
 
 			return addr.Compare(alloc.IP) == 0
 		}) == -1 {
+      // Once we allocated a new IP, and we have a sharing key, check if the sharing key is present in the index (we can reuse the result from earlier)
+      serviceViewIPPtr, foundServiceViewIP := ipam.rangesStore.GetServiceViewIPForSharingKey(sv.SharingKey)
+      if !foundServiceViewIP || serviceViewIPPtr == nil {
+        ipam.rangesStore.SetServiceViewIPForSharingKey(sv.SharingKey, alloc)
+      }
+      serviceViewIP := *serviceViewIPPtr
+      lbRangePtr := serviceViewIP.Origin
+
 			sv.Status.LoadBalancer.Ingress = append(sv.Status.LoadBalancer.Ingress, slim_core_v1.LoadBalancerIngress{
 				IP: alloc.IP.String(),
 			})
