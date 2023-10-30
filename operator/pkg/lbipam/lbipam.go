@@ -48,7 +48,7 @@ const (
 
 	// The annotation LB IPAM will look for when searching for requested IPs
 	ciliumSvcLBIPSAnnotation = "io.cilium/lb-ipam-ips"
-  ciliumSvcLBISKAnnotation = "io.cilium/lb-ipam-sharing-key"
+	ciliumSvcLBISKAnnotation = "io.cilium/lb-ipam-sharing-key"
 
 	// The string used in the FieldManager field on update options
 	ciliumFieldManager = "cilium-operator-lb-ipam"
@@ -692,6 +692,27 @@ func (ipam *LBIPAM) handleDeletedService(svc *slim_core_v1.Service) {
 		return
 	}
 
+	// When a service is deleted or updated such that it no longer requests the IP:
+	// * remove only the` ServiceView` for which the IP is no longer in use
+	for _, alloc := range sv.AllocatedIPs {
+		serviceViewPtr := alloc.Origin.alloc.Get(alloc.IP)
+		if serviceViewPtr == nil {
+			continue
+		}
+		serviceView := *serviceViewPtr
+		for i, serviceView := range serviceView {
+			if serviceView.Key.String() == sv.Key.String() {
+				serviceView = append(serviceView[:i], serviceView[i+1:]...)
+				//   * If this was the last `ServiceView`, free the IP from the allocator
+				if len(serviceView) == 0 {
+					lbRange.alloc.Free(alloc.IP)
+				}
+			}
+		}
+	}
+
+	// Failsave to prevent deallocating the IP if it is still in use by another service
+	// Only required if the logic above is flawed
 	for _, alloc := range sv.AllocatedIPs {
 		used_by_other := false
 		done:
