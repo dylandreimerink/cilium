@@ -711,7 +711,8 @@ func (ipam *LBIPAM) handleDeletedService(svc *slim_core_v1.Service) {
 		for i, serviceViewPtr := range serviceViews {
 			serviceView := *serviceViewPtr
 			if serviceView.Key.String() == sv.Key.String() {
-				serviceViews = append(serviceViews[:i], serviceViews[i+1:]...)
+				serviceViews = slices.Delete(serviceViews, i, i+1)
+				alloc.Origin.alloc.Update(alloc.IP, serviceViews)
 				//   * If this was the last `ServiceView`, free the IP from the allocator
 				if len(serviceViews) == 0 {
 					alloc.Origin.alloc.Free(alloc.IP)
@@ -725,24 +726,6 @@ func (ipam *LBIPAM) handleDeletedService(svc *slim_core_v1.Service) {
 					break
 				}
 			}
-		}
-	}
-
-	// Failsave to prevent deallocating the IP if it is still in use by another service
-	// Only required if the logic above is flawed
-	for _, alloc := range sv.AllocatedIPs {
-		used_by_other := false
-	done:
-		for _, serviceView := range ipam.serviceStore.satisfied {
-			for _, other_alloc := range serviceView.AllocatedIPs {
-				if other_alloc.IP == alloc.IP {
-					used_by_other = true
-					break done
-				}
-			}
-		}
-		if used_by_other == false {
-			alloc.Origin.alloc.Free(alloc.IP)
 		}
 	}
 
@@ -804,6 +787,7 @@ func (ipam *LBIPAM) satisfyService(sv *ServiceView) (statusModified bool, err er
 			if compatible {
 				sv.AllocatedIPs = append(sv.AllocatedIPs, *serviceViewIP)
 				serviceViews = append(serviceViews, sv)
+				lbRange.alloc.Update(serviceViewIP.IP, serviceViews)
 				break
 			}
 		}
@@ -951,10 +935,7 @@ donesharing:
 			if sv.SharingKey != "" {
 				//   * If no sharing key exists, add our newly allocated IP to the index
 				//   * If a sharing key exists, add our newly allocated IP to the list of `ServiceViews` for that key
-				ipam.rangesStore.AddServiceViewIPForSharingKey(sv.SharingKey, &ServiceViewIP{
-					IP:     alloc.IP,
-					Origin: alloc.Origin,
-				})
+				ipam.rangesStore.AddServiceViewIPForSharingKey(sv.SharingKey, &alloc)
 			}
 
 			sv.Status.LoadBalancer.Ingress = append(sv.Status.LoadBalancer.Ingress, slim_core_v1.LoadBalancerIngress{

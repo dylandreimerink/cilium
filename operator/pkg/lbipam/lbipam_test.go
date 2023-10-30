@@ -339,6 +339,270 @@ func TestAllocHappyPath(t *testing.T) {
 	}
 }
 
+// TestSharingKey tests that the sharing key causes the LB IPAM to reuse the same IP for services with the same
+// sharing key. This is useful for bare metal clusters where IP Space is limited. This test also verifies that
+// the ip is not reused if there is a conflict with another service.
+func TestSharingKey(t *testing.T) {
+	fixture := mkTestFixture([]*cilium_api_v2alpha1.CiliumLoadBalancerIPPool{
+		mkPool(poolAUID, "pool-a", []string{"10.0.10.0/24"}),
+	}, true, true, nil)
+
+	fixture.coreCS.Tracker().Add(
+		&slim_core_v1.Service{
+			ObjectMeta: slim_meta_v1.ObjectMeta{
+				Name:      "service-a",
+				Namespace: "default",
+				UID:       serviceAUID,
+				Annotations: map[string]string{
+					"io.cilium/lb-ipam-sharing-key": "key-a",
+				},
+			},
+			Spec: slim_core_v1.ServiceSpec{
+				Type: slim_core_v1.ServiceTypeLoadBalancer,
+				IPFamilies: []slim_core_v1.IPFamily{
+					slim_core_v1.IPv4Protocol,
+				},
+			},
+		},
+	)
+
+	var svcIP string
+	await := fixture.AwaitService(func(action k8s_testing.Action) bool {
+		if action.GetResource() != servicesResource || action.GetVerb() != "patch" {
+			return false
+		}
+
+		svc := fixture.PatchedSvc(action)
+
+		if len(svc.Status.LoadBalancer.Ingress) != 1 {
+			t.Error("Expected service to receive exactly one ingress IP")
+			return true
+		}
+
+		if net.ParseIP(svc.Status.LoadBalancer.Ingress[0].IP).To4() == nil {
+			t.Error("Expected service to receive a IPv4 address")
+			return true
+		}
+
+		svcIP = svc.Status.LoadBalancer.Ingress[0].IP
+
+		return true
+	}, time.Second)
+
+	go fixture.hive.Start(context.Background())
+	defer fixture.hive.Stop(context.Background())
+
+	if await.Block() {
+		t.Fatal("Expected service status to be updated")
+	}
+	// If t.Error was called within the await
+	if t.Failed() {
+		return
+	}
+
+	if _, has := fixture.lbIPAM.rangesStore.ranges[0].alloc.Get(netip.MustParseAddr(svcIP)); !has {
+		t.Fatal("Service IP hasn't been allocated")
+	}
+
+	fixture.coreCS.Tracker().Add(
+		&slim_core_v1.Service{
+			ObjectMeta: slim_meta_v1.ObjectMeta{
+				Name:      "service-b",
+				Namespace: "default",
+				UID:       serviceBUID,
+				Annotations: map[string]string{
+					"io.cilium/lb-ipam-sharing-key": "key-a",
+				},
+			},
+			Spec: slim_core_v1.ServiceSpec{
+				Type: slim_core_v1.ServiceTypeLoadBalancer,
+				IPFamilies: []slim_core_v1.IPFamily{
+					slim_core_v1.IPv4Protocol,
+				},
+			},
+		},
+	)
+
+	await = fixture.AwaitService(func(action k8s_testing.Action) bool {
+		if action.GetResource() != servicesResource || action.GetVerb() != "patch" {
+			return false
+		}
+
+		svc := fixture.PatchedSvc(action)
+
+		if len(svc.Status.LoadBalancer.Ingress) != 1 {
+			t.Error("Expected service to receive exactly one ingress IP")
+			return true
+		}
+
+		if net.ParseIP(svc.Status.LoadBalancer.Ingress[0].IP).To4() == nil {
+			t.Error("Expected service to receive a IPv4 address")
+			return true
+		}
+
+		if svc.Status.LoadBalancer.Ingress[0].IP != svcIP {
+			t.Error("Expected service to receive the same IP as service-a")
+			return true
+		}
+
+		return true
+	}, time.Second)
+
+	if await.Block() {
+		t.Fatal("Expected service status to be updated")
+	}
+	// If t.Error was called within the await
+	if t.Failed() {
+		return
+	}
+
+	if _, has := fixture.lbIPAM.rangesStore.ranges[0].alloc.Get(netip.MustParseAddr(svcIP)); !has {
+		t.Fatal("Service IP hasn't been allocated")
+	}
+
+	fixture.coreCS.Tracker().Add(
+		&slim_core_v1.Service{
+			ObjectMeta: slim_meta_v1.ObjectMeta{
+				Name:      "service-c",
+				Namespace: "default",
+				UID:       serviceCUID,
+				Annotations: map[string]string{
+					"io.cilium/lb-ipam-sharing-key": "key-b",
+				},
+			},
+			Spec: slim_core_v1.ServiceSpec{
+				Type: slim_core_v1.ServiceTypeLoadBalancer,
+				IPFamilies: []slim_core_v1.IPFamily{
+					slim_core_v1.IPv4Protocol,
+				},
+				Ports: []slim_core_v1.ServicePort{
+					{
+						Port: 80,
+					},
+				},
+			},
+		},
+	)
+
+	var svcIP2 string
+
+	await = fixture.AwaitService(func(action k8s_testing.Action) bool {
+		if action.GetResource() != servicesResource || action.GetVerb() != "patch" {
+			return false
+		}
+
+		svc := fixture.PatchedSvc(action)
+
+		if len(svc.Status.LoadBalancer.Ingress) != 1 {
+			t.Error("Expected service to receive exactly one ingress IP")
+			return true
+		}
+
+		if net.ParseIP(svc.Status.LoadBalancer.Ingress[0].IP).To4() == nil {
+			t.Error("Expected service to receive a IPv4 address")
+			return true
+		}
+
+		if svc.Status.LoadBalancer.Ingress[0].IP == svcIP {
+			t.Error("Expected service to receive a different IP than service-a")
+			return true
+		}
+
+		svcIP2 = svc.Status.LoadBalancer.Ingress[0].IP
+
+		return true
+	}, time.Second)
+
+	if await.Block() {
+		t.Fatal("Expected service status to be updated")
+	}
+	// If t.Error was called within the await
+	if t.Failed() {
+		return
+	}
+
+	err := fixture.svcClient.Services("default").Delete(context.Background(), "service-a", meta_v1.DeleteOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// The IP is not released because service-b is still using it
+	if _, has := fixture.lbIPAM.rangesStore.ranges[0].alloc.Get(netip.MustParseAddr(svcIP)); !has {
+		t.Fatal("Service IP has been released")
+	}
+
+	err = fixture.svcClient.Services("default").Delete(context.Background(), "service-b", meta_v1.DeleteOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// The IP is released because service-b is no longer using it
+	if _, has := fixture.lbIPAM.rangesStore.ranges[0].alloc.Get(netip.MustParseAddr(svcIP)); has {
+		t.Fatal("Service IP hasn't been released")
+	}
+
+	fixture.coreCS.Tracker().Add(
+		&slim_core_v1.Service{
+			ObjectMeta: slim_meta_v1.ObjectMeta{
+				Name:      "service-a",
+				Namespace: "default",
+				UID:       serviceAUID,
+				Annotations: map[string]string{
+					"io.cilium/lb-ipam-sharing-key": "key-b",
+				},
+			},
+			Spec: slim_core_v1.ServiceSpec{
+				Type: slim_core_v1.ServiceTypeLoadBalancer,
+				IPFamilies: []slim_core_v1.IPFamily{
+					slim_core_v1.IPv4Protocol,
+				},
+				Ports: []slim_core_v1.ServicePort{
+					{
+						Port: 80,
+					},
+				},
+			},
+		},
+	)
+
+	await = fixture.AwaitService(func(action k8s_testing.Action) bool {
+		if action.GetResource() != servicesResource || action.GetVerb() != "patch" {
+			return false
+		}
+
+		svc := fixture.PatchedSvc(action)
+
+		if len(svc.Status.LoadBalancer.Ingress) != 1 {
+			t.Error("Expected service to receive exactly one ingress IP")
+			return true
+		}
+
+		if net.ParseIP(svc.Status.LoadBalancer.Ingress[0].IP).To4() == nil {
+			t.Error("Expected service to receive a IPv4 address")
+			return true
+		}
+
+		if svc.Status.LoadBalancer.Ingress[0].IP == svcIP2 {
+			t.Error("Expected service to receive a different IP than service-c")
+			return true
+		}
+
+		return true
+	}, time.Second)
+
+	if await.Block() {
+		t.Fatal("Expected service status to be updated")
+	}
+	// If t.Error was called within the await
+	if t.Failed() {
+		return
+	}
+}
+
 // TestServiceDelete tests the service deletion logic. It makes sure that the IP that was assigned to the service is
 // released after the service is deleted so it can be re-assigned.
 func TestServiceDelete(t *testing.T) {
