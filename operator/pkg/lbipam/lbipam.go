@@ -841,14 +841,14 @@ donesharing:
 				// The IP was requested, but no sharing key was provided, so we can't satisfy the service with an existing IP.
 				if sv.SharingKey == "" {
 					msg := fmt.Sprintf("The IP '%s' is already allocated to another service", reqIP)
-					reason := "ip_in_use"
+					reason := "already_allocated"
 					if ipam.setSVCSatisfiedCondition(sv, false, reason, msg) {
 						statusModified = true
 					}
 				} else {
 					// The IP was requested and a sharing key was provided, but the IP is already allocated to another service with a different sharing key.
 					msg := fmt.Sprintf("The IP '%s' is already allocated to another service with a different sharing key", reqIP)
-					reason := "ip_in_use"
+					reason := "already_allocated_different_sharing_key"
 					if ipam.setSVCSatisfiedCondition(sv, false, reason, msg) {
 						statusModified = true
 					}
