@@ -436,9 +436,15 @@ func (ipam *LBIPAM) handleUpsertService(ctx context.Context, svc *slim_core_v1.S
 	sv.RequestedFamilies.IPv4, sv.RequestedFamilies.IPv6 = ipam.serviceIPFamilyRequest(svc)
 	sv.RequestedIPs = getSVCRequestedIPs(ipam.logger, svc)
 	sv.SharingKey = getSVCSharingKey(ipam.logger, svc)
-  sv.ExternalTrafficPolicy = svc.ExternalTrafficPolicy.DeepCopy()
-  sv.Ports = svc.Ports.DeepCopy()
-  sv.Selector = svc.Selector.DeepCopy()
+	sv.ExternalTrafficPolicy = svc.Spec.ExternalTrafficPolicy
+	sv.Ports = make([]slim_core_v1.ServicePort, len(svc.Spec.Ports))
+	for i, port := range svc.Spec.Ports {
+		sv.Ports[i] = port
+	}
+	sv.Selector = make(map[string]string)
+	for k, v := range svc.Spec.Selector {
+		sv.Selector[k] = v
+	}
 	sv.Status = svc.Status.DeepCopy()
 
 	// Remove any allocation that are no longer valid due to a change in the service spec
@@ -609,22 +615,25 @@ func (ipam *LBIPAM) stripOrImportIngresses(sv *ServiceView) (statusModified bool
 				continue
 			}
 
-			err = lbRange.alloc.Alloc(ip, true)
+			serviceViews := make([]*ServiceView, 0, 1)
+			serviceViews = append(serviceViews, sv)
+			err = lbRange.alloc.Alloc(ip, serviceViews)
 			if err != nil {
 				if errors.Is(err, ipalloc.ErrInUse) {
 					ipam.logger.WithFields(logrus.Fields{
 						"ingress-ip": ingress.IP,
 						"svc":        sv.Key,
 					}).Warningf(
-						"Ingress IP '%s' is assigned to multiple services, removing from svc '%s'",
+						"Ingress IP '%s' is assigned to multiple services, assuming no conflict '%s'",
 						ingress.IP,
 						sv.Key,
 					)
-
-					continue
+					serviceViews = append(serviceViews, sv)
+					err = lbRange.alloc.Update(ip, serviceViews)
 				}
-
-				return statusModified, fmt.Errorf("Error while attempting to allocate IP '%s'", ingress.IP)
+				if err != nil {
+					return statusModified, fmt.Errorf("Error while attempting to allocate IP '%s'", ingress.IP)
+				}
 			}
 
 			sv.AllocatedIPs = append(sv.AllocatedIPs, ServiceViewIP{
@@ -693,19 +702,27 @@ func (ipam *LBIPAM) handleDeletedService(svc *slim_core_v1.Service) {
 	}
 
 	// When a service is deleted or updated such that it no longer requests the IP:
-	// * remove only the` ServiceView` for which the IP is no longer in use
+	// * remove only the `ServiceView` for which the IP is no longer in use
 	for _, alloc := range sv.AllocatedIPs {
-		serviceViewPtr := alloc.Origin.alloc.Get(alloc.IP)
-		if serviceViewPtr == nil {
+		serviceViews, found := alloc.Origin.alloc.Get(alloc.IP)
+		if !found {
 			continue
 		}
-		serviceView := *serviceViewPtr
-		for i, serviceView := range serviceView {
+		for i, serviceViewPtr := range serviceViews {
+			serviceView := *serviceViewPtr
 			if serviceView.Key.String() == sv.Key.String() {
-				serviceView = append(serviceView[:i], serviceView[i+1:]...)
+				serviceViews = append(serviceViews[:i], serviceViews[i+1:]...)
 				//   * If this was the last `ServiceView`, free the IP from the allocator
-				if len(serviceView) == 0 {
-					lbRange.alloc.Free(alloc.IP)
+				if len(serviceViews) == 0 {
+					alloc.Origin.alloc.Free(alloc.IP)
+					//  * If the `ServiceView` has a sharing key, remove the IP from the `rangeStore`
+					if sv.SharingKey != "" {
+						ipam.rangesStore.DeleteServiceViewIPForSharingKey(sv.SharingKey, &ServiceViewIP{
+							IP:     alloc.IP,
+							Origin: alloc.Origin,
+						})
+					}
+					break
 				}
 			}
 		}
@@ -715,9 +732,9 @@ func (ipam *LBIPAM) handleDeletedService(svc *slim_core_v1.Service) {
 	// Only required if the logic above is flawed
 	for _, alloc := range sv.AllocatedIPs {
 		used_by_other := false
-		done:
+	done:
 		for _, serviceView := range ipam.serviceStore.satisfied {
-			for _, other_alloc := s.AllocatedIPs {
+			for _, other_alloc := range serviceView.AllocatedIPs {
 				if other_alloc.IP == alloc.IP {
 					used_by_other = true
 					break done
@@ -755,44 +772,44 @@ func (ipam *LBIPAM) satisfyServices(ctx context.Context) error {
 }
 
 func (ipam *LBIPAM) satisfyService(sv *ServiceView) (statusModified bool, err error) {
+	// We check if the service has a sharing key annotation(cilium version).
+	if sv.SharingKey != "" {
+		// If it does, we can see if it exists in the `rangeStore` via the index.
+		serviceViewIPs, foundServiceViewIP := ipam.rangesStore.GetServiceViewIPsForSharingKey(sv.SharingKey)
+		if !foundServiceViewIP || len(serviceViewIPs) == 0 {
+			// We don't have any `ServiceViews` with this sharing key, so we can't satisfy the service with an existing IP.
+			goto donesharing
+		}
+		for _, serviceViewIP := range serviceViewIPs {
+			// We iterate through the list of `ServiceViews` for this IP and check if the ports and external traffic policy of the current service is compatible with the existing `ServiceViews`
+			lbRangePtr := serviceViewIP.Origin
+			if lbRangePtr == nil {
+				continue
+			}
+			lbRange := *lbRangePtr
+			// If it exists, we go to the `LBRange` and get the list of `ServiceViews`.
+			serviceViews, foundServiceViewsPtr := lbRange.alloc.Get(serviceViewIP.IP)
+			if !foundServiceViewsPtr || len(serviceViews) == 0 {
+				continue
+			}
+			// Check if the ports and external traffic policy of the current service is compatible with the existing `ServiceViews`
+			compatible := true
+			for _, serviceView := range serviceViews {
+				if !(serviceView.isCompatible(sv)) {
+					compatible = false
+					break
+				}
+			}
+			// if it is, add the service view to the list, and satisfy the IP
+			if compatible {
+				sv.AllocatedIPs = append(sv.AllocatedIPs, *serviceViewIP)
+				serviceViews = append(serviceViews, sv)
+				break
+			}
+		}
+	}
+donesharing:
 	if len(sv.RequestedIPs) > 0 {
-    // We check if the service has a sharing key annotation(cilium version).
-    donesharing:
-    if sv.SharingKey != "" {
-      // If it does, we can see if it exists in the `rangeStore` via the index.
-      serviceViewIPPtr, foundServiceViewIP := ipam.rangesStore.GetServiceViewIPForSharingKey(sv.SharingKey)
-      if !foundServiceViewIP || serviceViewIPPtr == nil {
-        break donesharing
-      }
-      serviceViewIP := *serviceViewIPPtr
-      lbRangePtr := serviceViewIP.Origin
-      if lbRangePtr == nil {
-        break donesharing
-      }
-      lbRange := *lbRangePtr
-      // If it exists, we go to the `LBRange` and get the list of `ServiceViews`.
-      serviceViewsPtr, foundServiceViewsPtr := lbRange.alloc.Get(serviceViewIP.IP)
-      if !foundServiceViewsPtr || serviceViewsPtr == nil {
-        break donesharing
-      }
-      serviceViews := *serviceViewsPtr
-      // Check if the ports and external traffic policy of the current service is compatible with the existing `ServiceViews`
-      compatible := true
-      for _, serviceView := range serviceViews {
-        if !(serviceView.isCompatible(sv)) {
-          compatible = false
-          break
-        }
-      }
-      // if it is, add the service view to the list, and satisfy the IP
-      if compatible {
-        sv.AllocatedIPs = append(sv.AllocatedIPs, ServiceViewIP{
-          IP:     serviceViewIP.IP,
-          Origin: lbRange,
-        })
-        append(serviceViews, sv)
-      }
-    }
 		// The service requests specific IPs
 		for _, reqIP := range sv.RequestedIPs {
 			// if we are able to find the requested IP in the list of allocated IPs
@@ -821,9 +838,25 @@ func (ipam *LBIPAM) satisfyService(sv *ServiceView) (statusModified bool, err er
 			}
 
 			if _, exists := lbRange.alloc.Get(reqIP); exists {
+				// The IP was requested, but no sharing key was provided, so we can't satisfy the service with an existing IP.
+				if sv.SharingKey == "" {
+					msg := fmt.Sprintf("The IP '%s' is already allocated to another service", reqIP)
+					reason := "ip_in_use"
+					if ipam.setSVCSatisfiedCondition(sv, false, reason, msg) {
+						statusModified = true
+					}
+				} else {
+					// The IP was requested and a sharing key was provided, but the IP is already allocated to another service with a different sharing key.
+					msg := fmt.Sprintf("The IP '%s' is already allocated to another service with a different sharing key", reqIP)
+					reason := "ip_in_use"
+					if ipam.setSVCSatisfiedCondition(sv, false, reason, msg) {
+						statusModified = true
+					}
+				}
+				continue
 			} else {
 				ipam.logger.Debugf("Allocate '%s' for '%s'", reqIP.String(), sv.Key.String())
-				err = lbRange.alloc.Alloc(reqIP, true)
+				err = lbRange.alloc.Alloc(reqIP, []*ServiceView{sv})
 				if err != nil {
 					if errors.Is(err, ipalloc.ErrInUse) {
 						return statusModified, fmt.Errorf("ipalloc.Alloc: %w", err)
@@ -914,13 +947,15 @@ func (ipam *LBIPAM) satisfyService(sv *ServiceView) (statusModified bool, err er
 
 			return addr.Compare(alloc.IP) == 0
 		}) == -1 {
-      // Once we allocated a new IP, and we have a sharing key, check if the sharing key is present in the index (we can reuse the result from earlier)
-      serviceViewIPPtr, foundServiceViewIP := ipam.rangesStore.GetServiceViewIPForSharingKey(sv.SharingKey)
-      if !foundServiceViewIP || serviceViewIPPtr == nil {
-        ipam.rangesStore.SetServiceViewIPForSharingKey(sv.SharingKey, alloc)
-      }
-      serviceViewIP := *serviceViewIPPtr
-      lbRangePtr := serviceViewIP.Origin
+			// Once we allocated a new IP, and we have a sharing key, check if the sharing key is present in the index (we can reuse the result from earlier)
+			if sv.SharingKey != "" {
+				//   * If no sharing key exists, add our newly allocated IP to the index
+				//   * If a sharing key exists, add our newly allocated IP to the list of `ServiceViews` for that key
+				ipam.rangesStore.AddServiceViewIPForSharingKey(sv.SharingKey, &ServiceViewIP{
+					IP:     alloc.IP,
+					Origin: alloc.Origin,
+				})
+			}
 
 			sv.Status.LoadBalancer.Ingress = append(sv.Status.LoadBalancer.Ingress, slim_core_v1.LoadBalancerIngress{
 				IP: alloc.IP.String(),
@@ -1077,7 +1112,7 @@ func (ipam *LBIPAM) allocateIPAddress(
 		}
 
 		// Attempt to allocate the next IP from this range.
-		newIp, err := lbRange.alloc.AllocAny(true)
+		newIp, err := lbRange.alloc.AllocAny([]*ServiceView{sv})
 		if err != nil {
 			// If the range is full, mark it.
 			if errors.Is(err, ipalloc.ErrFull) {
@@ -1189,8 +1224,8 @@ func (ipam *LBIPAM) handleNewPool(ctx context.Context, pool *cilium_api_v2alpha1
 			// If the first and last IPs are the same or adjacent, we would reserve the entire range.
 			// Only reserve first and last IPs for ranges /30 or /126 and larger.
 			if !(from.Compare(to) == 0 || from.Next().Compare(to) == 0) {
-				lbRange.alloc.Alloc(from, true)
-				lbRange.alloc.Alloc(to, true)
+				lbRange.alloc.Alloc(from, nil)
+				lbRange.alloc.Alloc(to, nil)
 			}
 		}
 
@@ -1293,8 +1328,8 @@ func (ipam *LBIPAM) handlePoolModified(ctx context.Context, pool *cilium_api_v2a
 					// If the first and last IPs are the same or adjacent, we would reserve the entire range.
 					// Only reserve first and last IPs for ranges /30 or /126 and larger.
 					if !(from.Compare(to) == 0 || from.Next().Compare(to) == 0) {
-						extRange.alloc.Alloc(from, true)
-						extRange.alloc.Alloc(to, true)
+						extRange.alloc.Alloc(from, nil)
+						extRange.alloc.Alloc(to, nil)
 					}
 				}
 			}
@@ -1338,8 +1373,8 @@ func (ipam *LBIPAM) handlePoolModified(ctx context.Context, pool *cilium_api_v2a
 			// If the first and last IPs are the same or adjacent, we would reserve the entire range.
 			// Only reserve first and last IPs for ranges /30 or /126 and larger.
 			if !(from.Compare(to) == 0 || from.Next().Compare(to) == 0) {
-				newLBRange.alloc.Alloc(from, true)
-				newLBRange.alloc.Alloc(to, true)
+				newLBRange.alloc.Alloc(from, nil)
+				newLBRange.alloc.Alloc(to, nil)
 			}
 		}
 

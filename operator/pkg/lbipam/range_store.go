@@ -13,15 +13,15 @@ import (
 )
 
 type rangesStore struct {
-	ranges       []*LBRange
-	poolToRanges map[string][]*LBRange
-  sharingKeyToServiceViewIP map[string]*ServiceViewIP
+	ranges                     []*LBRange
+	poolToRanges               map[string][]*LBRange
+	sharingKeyToServiceViewIPs map[string][]*ServiceViewIP
 }
 
 func newRangesStore() rangesStore {
 	return rangesStore{
-		poolToRanges: make(map[string][]*LBRange),
-    sharingKeyToServiceViewIP: make(map[string]*ServiceViewIP)
+		poolToRanges:               make(map[string][]*LBRange),
+		sharingKeyToServiceViewIPs: make(map[string][]*ServiceViewIP),
 	}
 }
 
@@ -57,9 +57,43 @@ func (rs *rangesStore) GetRangesForPool(name string) ([]*LBRange, bool) {
 	return ranges, found
 }
 
-func (rs *rangesStore) GetServiceViewIPForSharingKey(sk string) (*ServiceViewIP, bool) {
-  serviceViewIP, found := rs.sharingKeyToServiceViewIP[sk]
-  return serviceViewIP, found
+func (rs *rangesStore) GetServiceViewIPsForSharingKey(sk string) ([]*ServiceViewIP, bool) {
+	serviceViewIPs, found := rs.sharingKeyToServiceViewIPs[sk]
+	return serviceViewIPs, found
+}
+
+func (rs *rangesStore) AddServiceViewIPForSharingKey(sk string, svip *ServiceViewIP) {
+	serviceViewIPs, found := rs.sharingKeyToServiceViewIPs[sk]
+	if !found {
+		serviceViewIPs = make([]*ServiceViewIP, 0)
+		serviceViewIPs = append(serviceViewIPs, svip)
+	} else {
+		for _, serviceViewIP := range serviceViewIPs {
+			if *serviceViewIP == *svip {
+				return
+			}
+		}
+		serviceViewIPs = append(serviceViewIPs, svip)
+	}
+	rs.sharingKeyToServiceViewIPs[sk] = serviceViewIPs
+}
+
+func (rs *rangesStore) DeleteServiceViewIPForSharingKey(sk string, svip *ServiceViewIP) {
+	serviceViewIPs, found := rs.sharingKeyToServiceViewIPs[sk]
+	if !found {
+		return
+	}
+	for i, serviceViewIP := range serviceViewIPs {
+		if *serviceViewIP == *svip {
+			serviceViewIPs = slices.Delete(serviceViewIPs, i, i+1)
+			break
+		}
+	}
+	if len(serviceViewIPs) > 0 {
+		rs.sharingKeyToServiceViewIPs[sk] = serviceViewIPs
+	} else {
+		delete(rs.sharingKeyToServiceViewIPs, sk)
+	}
 }
 
 type LBRange struct {
