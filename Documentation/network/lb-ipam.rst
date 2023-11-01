@@ -429,3 +429,49 @@ for the network and broadcast addresses respectively.
     $ kubectl -n example get svc                
     NAME           TYPE           CLUSTER-IP     EXTERNAL-IP               PORT(S)          AGE
     service-blue   LoadBalancer   10.96.26.105   20.0.10.100,20.0.10.200   1234:30363/TCP   43s
+
+Sharing Keys
+------------
+
+Services can share the same ip or set of ips with other services. This is done by setting the ``io.cilium/lb-ipam-sharing-key`` annotation on the service.
+Services that have the same sharing key annotation will share the same ip or set of ips. The sharing key is a string that can be any value.
+
+.. code-block:: yaml
+
+	apiVersion: v1
+	kind: Service
+	metadata:
+		name: service-blue
+		namespace: example
+		labels:
+			color: blue
+		annotations:
+			"io.cilium/lb-ipam-sharing-key": "1234"
+	spec:
+		type: LoadBalancer
+		ports:
+		- port: 1234
+	---
+	apiVersion: v1
+	kind: Service
+	metadata:
+		name: service-red
+		namespace: example
+		labels:
+			color: red
+		annotations:
+			"io.cilium/lb-ipam-sharing-key": "1234"
+	spec:
+		type: LoadBalancer
+		ports:
+		- port: 2345
+
+.. code-block:: shell-session
+
+	$ kubeclt -n example get svc
+	NAME           TYPE           CLUSTER-IP     EXTERNAL-IP               PORT(S)          AGE
+	service-blue   LoadBalancer   10.96.26.105   20.0.10.100               1234:30363/TCP   43s
+	service-red    LoadBalancer   10.96.26.106   20.0.10.100               2345:30131/TCP   43s
+
+As long as the services do not have conflicting ports, they will be allocated the same ip. If the services have conflicting ports, they will be allocated different ips, which will be added to the set of ips belonging to the sharing key.
+If a service has a sharing key and also requests a specific ip, the service will be allocated the requested ip and it will be added to the set of ips belonging to that sharing key.
