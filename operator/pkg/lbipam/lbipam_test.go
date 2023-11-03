@@ -601,6 +601,87 @@ func TestSharingKey(t *testing.T) {
 	if t.Failed() {
 		return
 	}
+
+	fixture.coreCS.Tracker().Add(
+		&slim_core_v1.Service{
+			ObjectMeta: slim_meta_v1.ObjectMeta{
+				Name:      "service-b",
+				Namespace: "default",
+				UID:       serviceBUID,
+				Annotations: map[string]string{
+					"io.cilium/lb-ipam-sharing-key": "key-b",
+				},
+			},
+			Spec: slim_core_v1.ServiceSpec{
+				Type: slim_core_v1.ServiceTypeLoadBalancer,
+				IPFamilies: []slim_core_v1.IPFamily{
+					slim_core_v1.IPv4Protocol,
+				},
+				Ports: []slim_core_v1.ServicePort{
+					{
+						Port: 81,
+					},
+				},
+			},
+		},
+	)
+
+	await = fixture.AwaitService(func(action k8s_testing.Action) bool {
+		if action.GetResource() != servicesResource || action.GetVerb() != "patch" {
+			return false
+		}
+
+		svc := fixture.PatchedSvc(action)
+
+		if len(svc.Status.LoadBalancer.Ingress) != 1 {
+			t.Error("Expected service to receive exactly one ingress IP")
+			return true
+		}
+
+		if net.ParseIP(svc.Status.LoadBalancer.Ingress[0].IP).To4() == nil {
+			t.Error("Expected service to receive a IPv4 address")
+			return true
+		}
+
+		if svc.Status.LoadBalancer.Ingress[0].IP != svcIP2 {
+			t.Error("Expected service to receive the same IP as service-c")
+			return true
+		}
+
+		return true
+	}, time.Second)
+
+	if await.Block() {
+		t.Fatal("Expected service status to be updated")
+	}
+	// If t.Error was called within the await
+	if t.Failed() {
+		return
+	}
+
+	err = fixture.svcClient.Services("default").Delete(context.Background(), "service-c", meta_v1.DeleteOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// The IP is not released because service-b is still using it
+	if _, has := fixture.lbIPAM.rangesStore.ranges[0].alloc.Get(netip.MustParseAddr(svcIP2)); !has {
+		t.Fatal("Service IP has been released")
+	}
+
+	err = fixture.svcClient.Services("default").Delete(context.Background(), "service-b", meta_v1.DeleteOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// The IP is released because service-b is no longer using it
+	if _, has := fixture.lbIPAM.rangesStore.ranges[0].alloc.Get(netip.MustParseAddr(svcIP2)); has {
+		t.Fatal("Service IP hasn't been released")
+	}
 }
 
 // TestServiceDelete tests the service deletion logic. It makes sure that the IP that was assigned to the service is
