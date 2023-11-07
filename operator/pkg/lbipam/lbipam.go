@@ -441,6 +441,7 @@ func (ipam *LBIPAM) handleUpsertService(ctx context.Context, svc *slim_core_v1.S
 	for i, port := range svc.Spec.Ports {
 		sv.Ports[i] = port
 	}
+	sv.Namespace = svc.Namespace
 	sv.Selector = make(map[string]string)
 	for k, v := range svc.Spec.Selector {
 		sv.Selector[k] = v
@@ -615,8 +616,7 @@ func (ipam *LBIPAM) stripOrImportIngresses(sv *ServiceView) (statusModified bool
 				continue
 			}
 
-			serviceViews := make([]*ServiceView, 0, 1)
-			serviceViews = append(serviceViews, sv)
+			serviceViews := []*ServiceView{sv}
 			err = lbRange.alloc.Alloc(ip, serviceViews)
 			if err != nil {
 				if errors.Is(err, ipalloc.ErrInUse) {
@@ -821,7 +821,7 @@ donesharing:
 				continue
 			}
 
-			if _, exists := lbRange.alloc.Get(reqIP); exists {
+			if serviceViews, exists := lbRange.alloc.Get(reqIP); exists {
 				// The IP was requested, but no sharing key was provided, so we can't satisfy the service with an existing IP.
 				if sv.SharingKey == "" {
 					msg := fmt.Sprintf("The IP '%s' is already allocated to another service", reqIP)
@@ -829,15 +829,33 @@ donesharing:
 					if ipam.setSVCSatisfiedCondition(sv, false, reason, msg) {
 						statusModified = true
 					}
-				} else {
+					continue
+				}
+				// Check if the ports and external traffic policy of the current service is compatible with the existing `ServiceViews`
+				// This also checks if the sharing key is the same
+				compatible := true
+				for _, serviceView := range serviceViews {
+					if !(serviceView.isCompatible(sv)) {
+						compatible = false
+						break
+					}
+				}
+				// if it is, add the service view to the list, and satisfy the IP
+				if !compatible {
 					// The IP was requested and a sharing key was provided, but the IP is already allocated to another service with a different sharing key.
 					msg := fmt.Sprintf("The IP '%s' is already allocated to another service with a different sharing key", reqIP)
 					reason := "already_allocated_different_sharing_key"
 					if ipam.setSVCSatisfiedCondition(sv, false, reason, msg) {
 						statusModified = true
 					}
+					continue
 				}
-				continue
+				serviceViews = append(serviceViews, sv)
+				err = lbRange.alloc.Update(reqIP, serviceViews)
+				if err != nil {
+					ipam.logger.WithError(err).Errorf("Error while attempting to update IP '%s'", reqIP)
+					continue
+				}
 			} else {
 				ipam.logger.Debugf("Allocate '%s' for '%s'", reqIP.String(), sv.Key.String())
 				err = lbRange.alloc.Alloc(reqIP, []*ServiceView{sv})
@@ -871,50 +889,132 @@ donesharing:
 
 		// Missing an IPv4 address, lets attempt to allocate an address
 		if sv.RequestedFamilies.IPv4 && !hasIPv4 {
-			newIP, lbRange, err := ipam.allocateIPAddress(sv, IPv4Family)
-			if err != nil && !errors.Is(err, ipalloc.ErrFull) {
-				return statusModified, fmt.Errorf("allocateIPAddress: %w", err)
-			}
-			if newIP.Compare(netip.Addr{}) != 0 {
-				sv.AllocatedIPs = append(sv.AllocatedIPs, ServiceViewIP{
-					IP:     newIP,
-					Origin: lbRange,
-				})
-			} else {
-				reason := "no_pool"
-				message := "There are no enabled CiliumLoadBalancerIPPools that match this service"
-				if errors.Is(err, ipalloc.ErrFull) {
-					reason = "out_of_ips"
-					message = "All enabled CiliumLoadBalancerIPPools that match this service ran out of allocatable IPs"
+			allocatedFromSharingKey := false
+			if sv.SharingKey != "" {
+				// If the service has a sharing key, check if it exists in the `rangeStore` via the index.
+				serviceViewIPs, foundServiceViewIP := ipam.rangesStore.GetServiceViewIPsForSharingKey(sv.SharingKey)
+				if foundServiceViewIP && len(serviceViewIPs) > 0 {
+					// If it exists, we go to the `LBRange` and get the list of `ServiceViews`.
+					for _, serviceViewIP := range serviceViewIPs {
+						// We only want to allocate IPv4 addresses from the sharing key pool
+						if isIPv6(serviceViewIP.IP) {
+							continue
+						}
+						lbRangePtr := serviceViewIP.Origin
+						if lbRangePtr == nil {
+							continue
+						}
+						lbRange := *lbRangePtr
+						serviceViews, foundServiceViewsPtr := lbRange.alloc.Get(serviceViewIP.IP)
+						if !foundServiceViewsPtr || len(serviceViews) == 0 {
+							continue
+						}
+						// Check if the ports and external traffic policy of the current service is compatible with the existing `ServiceViews`
+						compatible := true
+						for _, serviceView := range serviceViews {
+							if !(serviceView.isCompatible(sv)) {
+								compatible = false
+								break
+							}
+						}
+						// if it is, add the service view to the list, and satisfy the IP
+						if compatible {
+							sv.AllocatedIPs = append(sv.AllocatedIPs, *serviceViewIP)
+							serviceViews = append(serviceViews, sv)
+							lbRange.alloc.Update(serviceViewIP.IP, serviceViews)
+							allocatedFromSharingKey = true
+							break
+						}
+					}
 				}
+			}
+			if !allocatedFromSharingKey {
+				newIP, lbRange, err := ipam.allocateIPAddress(sv, IPv4Family)
+				if err != nil && !errors.Is(err, ipalloc.ErrFull) {
+					return statusModified, fmt.Errorf("allocateIPAddress: %w", err)
+				}
+				if newIP.Compare(netip.Addr{}) != 0 {
+					sv.AllocatedIPs = append(sv.AllocatedIPs, ServiceViewIP{
+						IP:     newIP,
+						Origin: lbRange,
+					})
+				} else {
+					reason := "no_pool"
+					message := "There are no enabled CiliumLoadBalancerIPPools that match this service"
+					if errors.Is(err, ipalloc.ErrFull) {
+						reason = "out_of_ips"
+						message = "All enabled CiliumLoadBalancerIPPools that match this service ran out of allocatable IPs"
+					}
 
-				if ipam.setSVCSatisfiedCondition(sv, false, reason, message) {
-					statusModified = true
+					if ipam.setSVCSatisfiedCondition(sv, false, reason, message) {
+						statusModified = true
+					}
 				}
 			}
 		}
 
 		// Missing an IPv6 address, lets attempt to allocate an address
 		if sv.RequestedFamilies.IPv6 && !hasIPv6 {
-			newIP, lbRange, err := ipam.allocateIPAddress(sv, IPv6Family)
-			if err != nil && !errors.Is(err, ipalloc.ErrFull) {
-				return statusModified, fmt.Errorf("allocateIPAddress: %w", err)
-			}
-			if newIP.Compare(netip.Addr{}) != 0 {
-				sv.AllocatedIPs = append(sv.AllocatedIPs, ServiceViewIP{
-					IP:     newIP,
-					Origin: lbRange,
-				})
-			} else {
-				reason := "no_pool"
-				message := "There are no enabled CiliumLoadBalancerIPPools that match this service"
-				if errors.Is(err, ipalloc.ErrFull) {
-					reason = "out_of_ips"
-					message = "All enabled CiliumLoadBalancerIPPools that match this service ran out of allocatable IPs"
+			allocatedFromSharingKey := false
+			if sv.SharingKey != "" {
+				// If the service has a sharing key, check if it exists in the `rangeStore` via the index.
+				serviceViewIPs, foundServiceViewIP := ipam.rangesStore.GetServiceViewIPsForSharingKey(sv.SharingKey)
+				if foundServiceViewIP && len(serviceViewIPs) > 0 {
+					// If it exists, we go to the `LBRange` and get the list of `ServiceViews`.
+					for _, serviceViewIP := range serviceViewIPs {
+						// We only want to allocate IPv6 addresses from the sharing key pool
+						if !isIPv6(serviceViewIP.IP) {
+							continue
+						}
+						lbRangePtr := serviceViewIP.Origin
+						if lbRangePtr == nil {
+							continue
+						}
+						lbRange := *lbRangePtr
+						serviceViews, foundServiceViewsPtr := lbRange.alloc.Get(serviceViewIP.IP)
+						if !foundServiceViewsPtr || len(serviceViews) == 0 {
+							continue
+						}
+						// Check if the ports and external traffic policy of the current service is compatible with the existing `ServiceViews`
+						compatible := true
+						for _, serviceView := range serviceViews {
+							if !(serviceView.isCompatible(sv)) {
+								compatible = false
+								break
+							}
+						}
+						// if it is, add the service view to the list, and satisfy the IP
+						if compatible {
+							sv.AllocatedIPs = append(sv.AllocatedIPs, *serviceViewIP)
+							serviceViews = append(serviceViews, sv)
+							lbRange.alloc.Update(serviceViewIP.IP, serviceViews)
+							allocatedFromSharingKey = true
+							break
+						}
+					}
 				}
+			}
+			if !allocatedFromSharingKey {
+				newIP, lbRange, err := ipam.allocateIPAddress(sv, IPv6Family)
+				if err != nil && !errors.Is(err, ipalloc.ErrFull) {
+					return statusModified, fmt.Errorf("allocateIPAddress: %w", err)
+				}
+				if newIP.Compare(netip.Addr{}) != 0 {
+					sv.AllocatedIPs = append(sv.AllocatedIPs, ServiceViewIP{
+						IP:     newIP,
+						Origin: lbRange,
+					})
+				} else {
+					reason := "no_pool"
+					message := "There are no enabled CiliumLoadBalancerIPPools that match this service"
+					if errors.Is(err, ipalloc.ErrFull) {
+						reason = "out_of_ips"
+						message = "All enabled CiliumLoadBalancerIPPools that match this service ran out of allocatable IPs"
+					}
 
-				if ipam.setSVCSatisfiedCondition(sv, false, reason, message) {
-					statusModified = true
+					if ipam.setSVCSatisfiedCondition(sv, false, reason, message) {
+						statusModified = true
+					}
 				}
 			}
 		}
