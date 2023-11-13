@@ -494,9 +494,23 @@ func (ipam *LBIPAM) stripInvalidAllocations(sv *ServiceView) error {
 
 		releaseAllocIP := func() error {
 			ipam.logger.Debugf("removing allocation '%s' from '%s'", alloc.IP.String(), sv.Key.String())
-			alloc.Origin.alloc.Free(alloc.IP)
+			sharingGroup, _ := alloc.Origin.alloc.Get(alloc.IP)
+
+			idx := slices.Index(sharingGroup, sv)
+			if idx != -1 {
+				sharingGroup = slices.Delete(sharingGroup, idx, idx+1)
+			}
+
+			if len(sharingGroup) == 0 {
+				alloc.Origin.alloc.Free(alloc.IP)
+			} else {
+				alloc.Origin.alloc.Update(alloc.IP, sharingGroup)
+			}
 
 			sv.AllocatedIPs = slices.Delete(sv.AllocatedIPs, allocIdx, allocIdx+1)
+
+			ipam.rangesStore.DeleteServiceViewIPForSharingKey(sv.SharingKey, &alloc)
+
 			return nil
 		}
 
@@ -518,6 +532,29 @@ func (ipam *LBIPAM) stripInvalidAllocations(sv *ServiceView) error {
 			if !selector.Matches(sv.Labels) {
 				errs = errors.Join(errs, releaseAllocIP())
 				continue
+			}
+		}
+
+		// Check if all AllocatedIPs that are part of a sharing group, if this service is still compatible with them.
+		// If this service is no longer compatible, we have to remove the IP from the sharing group and re-allocate.
+		for _, allocIP := range sv.AllocatedIPs {
+			sharedViews, _ := allocIP.Origin.alloc.Get(allocIP.IP)
+			if len(sharedViews) == 1 {
+				// The allocation isn't shared, we can continue
+				continue
+			}
+
+			compatible := true
+			for _, sharedView := range sharedViews {
+				if sv != sharedView && !sharedView.isCompatible(sv) {
+					compatible = false
+					break
+				}
+			}
+
+			if !compatible {
+				errs = errors.Join(errs, releaseAllocIP())
+				break
 			}
 		}
 
@@ -620,20 +657,12 @@ func (ipam *LBIPAM) stripOrImportIngresses(sv *ServiceView) (statusModified bool
 			err = lbRange.alloc.Alloc(ip, serviceViews)
 			if err != nil {
 				if errors.Is(err, ipalloc.ErrInUse) {
-					ipam.logger.WithFields(logrus.Fields{
-						"ingress-ip": ingress.IP,
-						"svc":        sv.Key,
-					}).Warningf(
-						"Ingress IP '%s' is assigned to multiple services, assuming no conflict '%s'",
-						ingress.IP,
-						sv.Key,
-					)
-					serviceViews = append(serviceViews, sv)
-					err = lbRange.alloc.Update(ip, serviceViews)
+					// The IP is already allocated, defer to regular allocation logic to deterime
+					// if this service can share the allocation.
+					continue
 				}
-				if err != nil {
-					return statusModified, fmt.Errorf("Error while attempting to allocate IP '%s'", ingress.IP)
-				}
+
+				return statusModified, fmt.Errorf("Error while attempting to allocate IP '%s'", ingress.IP)
 			}
 
 			sv.AllocatedIPs = append(sv.AllocatedIPs, ServiceViewIP{
@@ -708,24 +737,24 @@ func (ipam *LBIPAM) handleDeletedService(svc *slim_core_v1.Service) {
 		if !found {
 			continue
 		}
-		for i, serviceViewPtr := range serviceViews {
-			serviceView := *serviceViewPtr
-			if serviceView.Key.String() == sv.Key.String() {
-				serviceViews = slices.Delete(serviceViews, i, i+1)
-				alloc.Origin.alloc.Update(alloc.IP, serviceViews)
-				//   * If this was the last `ServiceView`, free the IP from the allocator
-				if len(serviceViews) == 0 {
-					alloc.Origin.alloc.Free(alloc.IP)
-					//  * If the `ServiceView` has a sharing key, remove the IP from the `rangeStore`
-					if sv.SharingKey != "" {
-						ipam.rangesStore.DeleteServiceViewIPForSharingKey(sv.SharingKey, &ServiceViewIP{
-							IP:     alloc.IP,
-							Origin: alloc.Origin,
-						})
-					}
-					break
-				}
-			}
+
+		i := slices.Index(serviceViews, sv)
+		if i != -1 {
+			serviceViews = slices.Delete(serviceViews, i, i+1)
+			alloc.Origin.alloc.Update(alloc.IP, serviceViews)
+		}
+
+		//   * If this was the last `ServiceView`, free the IP from the allocator
+		if len(serviceViews) == 0 {
+			alloc.Origin.alloc.Free(alloc.IP)
+		}
+
+		//  * If the `ServiceView` has a sharing key, remove the IP from the `rangeStore`
+		if sv.SharingKey != "" {
+			ipam.rangesStore.DeleteServiceViewIPForSharingKey(sv.SharingKey, &ServiceViewIP{
+				IP:     alloc.IP,
+				Origin: alloc.Origin,
+			})
 		}
 	}
 
@@ -763,6 +792,7 @@ func (ipam *LBIPAM) satisfyService(sv *ServiceView) (statusModified bool, err er
 			// We don't have any `ServiceViews` with this sharing key, so we can't satisfy the service with an existing IP.
 			goto donesharing
 		}
+
 		for _, serviceViewIP := range serviceViewIPs {
 			// We iterate through the list of `ServiceViews` for this IP and check if the ports and external traffic policy of the current service is compatible with the existing `ServiceViews`
 			lbRangePtr := serviceViewIP.Origin
