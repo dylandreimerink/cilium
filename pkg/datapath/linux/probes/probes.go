@@ -690,8 +690,6 @@ func writeCommonHeader(writer io.Writer, probes *FeatureProbes) error {
 			probes.ProgramHelpers[ProgramHelper{ebpf.CGroupSockAddr, asm.FnJiffies64}] &&
 			probes.ProgramHelpers[ProgramHelper{ebpf.SchedCLS, asm.FnJiffies64}] &&
 			probes.ProgramHelpers[ProgramHelper{ebpf.XDP, asm.FnJiffies64}],
-		"HAVE_SOCKET_LOOKUP": probes.ProgramHelpers[ProgramHelper{ebpf.CGroupSockAddr, asm.FnSkLookupTcp}] &&
-			probes.ProgramHelpers[ProgramHelper{ebpf.CGroupSockAddr, asm.FnSkLookupUdp}],
 		"HAVE_CGROUP_ID":        probes.ProgramHelpers[ProgramHelper{ebpf.CGroupSockAddr, asm.FnGetCurrentCgroupId}],
 		"HAVE_LARGE_INSN_LIMIT": probes.Misc.HaveLargeInsnLimit,
 		"HAVE_SET_RETVAL":       probes.ProgramHelpers[ProgramHelper{ebpf.CGroupSock, asm.FnSetRetval}],
