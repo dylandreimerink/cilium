@@ -27,6 +27,7 @@ import (
 	datapath "github.com/cilium/cilium/pkg/datapath/types"
 	"github.com/cilium/cilium/pkg/hive"
 	"github.com/cilium/cilium/pkg/hive/cell"
+	"github.com/cilium/cilium/pkg/mtu"
 	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/testutils"
@@ -121,13 +122,13 @@ func writeConfig(c *C, header string, write writeFn) {
 
 func (s *ConfigSuite) TestWriteNodeConfig(c *C) {
 	writeConfig(c, "node", func(w io.Writer, dp datapath.ConfigWriter) error {
-		return dp.WriteNodeConfig(w, &dummyNodeCfg)
+		return dp.WriteNodeConfig(w, mtu.EthernetMTU)
 	})
 }
 
 func (s *ConfigSuite) TestWriteNetdevConfig(c *C) {
 	writeConfig(c, "netdev", func(w io.Writer, dp datapath.ConfigWriter) error {
-		return dp.WriteNetdevConfig(w, &dummyDevCfg)
+		return dp.WriteNetdevConfig(w, nil)
 	})
 }
 
@@ -147,7 +148,9 @@ func (s *ConfigSuite) TestWriteEndpointConfig(c *C) {
 
 	testRun := func(t *testutils.TestEndpoint) ([]byte, map[string]uint64, map[string]string) {
 		cfg := &HeaderfileWriter{}
-		varSub, stringSub := loader.NewLoader(sysctl.NewDirectSysctl(afero.NewOsFs(), "/proc")).ELFSubstitutions(t)
+		varSub, stringSub := loader.NewLoader(loader.LoaderParams{
+			Sysctl: sysctl.NewDirectSysctl(afero.NewOsFs(), "/proc"),
+		}).ELFSubstitutions(t)
 
 		var buf bytes.Buffer
 		cfg.writeStaticData(&buf, t)
@@ -232,7 +235,9 @@ func (s *ConfigSuite) TestWriteStaticData(c *C) {
 	cfg := &HeaderfileWriter{}
 	ep := &dummyEPCfg
 
-	varSub, stringSub := loader.NewLoader(sysctl.NewDirectSysctl(afero.NewOsFs(), "/proc")).ELFSubstitutions(ep)
+	varSub, stringSub := loader.NewLoader(loader.LoaderParams{
+		Sysctl: sysctl.NewDirectSysctl(afero.NewOsFs(), "/proc"),
+	}).ELFSubstitutions(ep)
 
 	var buf bytes.Buffer
 	cfg.writeStaticData(&buf, ep)
@@ -374,7 +379,7 @@ func TestWriteNodeConfigExtraDefines(t *testing.T) {
 	require.NoError(t, err)
 
 	buffer.Reset()
-	require.NoError(t, cfg.WriteNodeConfig(&buffer, &dummyNodeCfg))
+	require.NoError(t, cfg.WriteNodeConfig(&buffer, mtu.EthernetMTU))
 
 	output := buffer.String()
 	require.Contains(t, output, "define FOO 0x1\n")
@@ -394,7 +399,7 @@ func TestWriteNodeConfigExtraDefines(t *testing.T) {
 	require.NoError(t, err)
 
 	buffer.Reset()
-	require.Error(t, cfg.WriteNodeConfig(&buffer, &dummyNodeCfg))
+	require.Error(t, cfg.WriteNodeConfig(&buffer, mtu.EthernetMTU))
 
 	// Assert that an error is returned when one extra define would overwrite an already existing entry
 	cfg, err = NewHeaderfileWriter(WriterParams{
@@ -410,7 +415,7 @@ func TestWriteNodeConfigExtraDefines(t *testing.T) {
 	require.NoError(t, err)
 
 	buffer.Reset()
-	require.Error(t, cfg.WriteNodeConfig(&buffer, &dummyNodeCfg))
+	require.Error(t, cfg.WriteNodeConfig(&buffer, mtu.EthernetMTU))
 }
 
 func TestNewHeaderfileWriter(t *testing.T) {
@@ -438,6 +443,6 @@ func TestNewHeaderfileWriter(t *testing.T) {
 		Sysctl:             sysctl.NewDirectSysctl(afero.NewOsFs(), "/proc"),
 	})
 	require.NoError(t, err)
-	require.NoError(t, cfg.WriteNodeConfig(&buffer, &dummyNodeCfg))
+	require.NoError(t, cfg.WriteNodeConfig(&buffer, mtu.EthernetMTU))
 	require.Contains(t, buffer.String(), "define A 1\n")
 }

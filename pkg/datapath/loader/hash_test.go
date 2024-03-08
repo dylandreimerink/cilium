@@ -16,6 +16,7 @@ import (
 	datapath "github.com/cilium/cilium/pkg/datapath/types"
 	"github.com/cilium/cilium/pkg/hive"
 	"github.com/cilium/cilium/pkg/hive/cell"
+	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/testutils"
 )
 
@@ -49,8 +50,11 @@ func (s *LoaderTestSuite) TesthashDatapath(c *C) {
 	h := newDatapathHash()
 	baseHash := h.String()
 
+	lib := make(option.OptionLibrary)
+	opts := option.NewIntOptions(&lib)
+
 	// Ensure we get different hashes when config is added
-	h = hashDatapath(cfg, &dummyNodeCfg, &dummyDevCfg, &dummyEPCfg)
+	h = hashDatapath(cfg, 1500, opts, &dummyEPCfg)
 	dummyHash := h.String()
 	c.Assert(dummyHash, Not(Equals), baseHash)
 
@@ -61,7 +65,7 @@ func (s *LoaderTestSuite) TesthashDatapath(c *C) {
 
 	// Ensure that with a copy of the endpoint config we get the same hash
 	newEPCfg := dummyEPCfg
-	h = hashDatapath(cfg, &dummyNodeCfg, &dummyDevCfg, &newEPCfg)
+	h = hashDatapath(cfg, 1500, opts, &newEPCfg)
 	c.Assert(h.String(), Not(Equals), baseHash)
 	c.Assert(h.String(), Equals, dummyHash)
 
@@ -70,14 +74,14 @@ func (s *LoaderTestSuite) TesthashDatapath(c *C) {
 	// This is the key to avoiding recompilation per endpoint; static
 	// data substitution is performed via pkg/elf instead.
 	newEPCfg.Id++
-	h = hashDatapath(cfg, &dummyNodeCfg, &dummyDevCfg, &newEPCfg)
+	h = hashDatapath(cfg, 1500, opts, &newEPCfg)
 	c.Assert(h.String(), Not(Equals), baseHash)
 	c.Assert(h.String(), Equals, dummyHash)
 
 	// But when we configure the endpoint differently, it's different
 	newEPCfg = testutils.NewTestEndpoint()
 	newEPCfg.Opts.SetBool("foo", true)
-	h = hashDatapath(cfg, &dummyNodeCfg, &dummyDevCfg, &newEPCfg)
+	h = hashDatapath(cfg, 1500, opts, &newEPCfg)
 	c.Assert(h.String(), Not(Equals), baseHash)
 	c.Assert(h.String(), Not(Equals), dummyHash)
 }

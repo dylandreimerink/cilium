@@ -14,6 +14,7 @@ import (
 	"github.com/cilium/cilium/pkg/datapath/iptables"
 	"github.com/cilium/cilium/pkg/datapath/l2responder"
 	"github.com/cilium/cilium/pkg/datapath/link"
+	"github.com/cilium/cilium/pkg/datapath/linux"
 	linuxdatapath "github.com/cilium/cilium/pkg/datapath/linux"
 	"github.com/cilium/cilium/pkg/datapath/linux/bandwidth"
 	"github.com/cilium/cilium/pkg/datapath/linux/bigtcp"
@@ -28,13 +29,13 @@ import (
 	"github.com/cilium/cilium/pkg/datapath/tables"
 	"github.com/cilium/cilium/pkg/datapath/tunnel"
 	"github.com/cilium/cilium/pkg/datapath/types"
-	"github.com/cilium/cilium/pkg/defaults"
 	"github.com/cilium/cilium/pkg/hive/cell"
 	"github.com/cilium/cilium/pkg/maps"
 	"github.com/cilium/cilium/pkg/maps/eventsmap"
 	"github.com/cilium/cilium/pkg/maps/nodemap"
 	monitorAgent "github.com/cilium/cilium/pkg/monitor/agent"
 	"github.com/cilium/cilium/pkg/mtu"
+	"github.com/cilium/cilium/pkg/nodediscovery"
 	"github.com/cilium/cilium/pkg/option"
 	wg "github.com/cilium/cilium/pkg/wireguard/agent"
 	wgTypes "github.com/cilium/cilium/pkg/wireguard/types"
@@ -132,6 +133,10 @@ var Cell = cell.Module(
 
 	// Provides the loader, which compiles and loads the datapath programs.
 	loader.Cell,
+
+	linux.Cell,
+
+	nodediscovery.Cell,
 )
 
 func newWireguardAgent(lc cell.Lifecycle, sysctl sysctl.Sysctl) *wg.Agent {
@@ -163,11 +168,6 @@ func newWireguardAgent(lc cell.Lifecycle, sysctl sysctl.Sysctl) *wg.Agent {
 }
 
 func newDatapath(params datapathParams) types.Datapath {
-	datapathConfig := linuxdatapath.DatapathConfiguration{
-		HostDevice:   defaults.HostDevice,
-		TunnelDevice: params.TunnelConfig.DeviceName(),
-	}
-
 	datapath := linuxdatapath.NewDatapath(linuxdatapath.DatapathParams{
 		ConfigWriter:   params.ConfigWriter,
 		RuleManager:    params.IptablesManager,
@@ -177,7 +177,10 @@ func newDatapath(params datapathParams) types.Datapath {
 		BWManager:      params.BandwidthManager,
 		Loader:         params.Loader,
 		Orchestrator:   params.Orchestrator,
-	}, datapathConfig)
+		NodeHandler:    params.NodeHandler,
+		NodeIDHandler:  params.NodeIDHandler,
+		NodeNeighbors:  params.NodeNeighbors,
+	})
 
 	params.LC.Append(cell.Hook{
 		OnStart: func(cell.HookContext) error {
@@ -202,6 +205,10 @@ type datapathParams struct {
 	NodeMap nodemap.Map
 
 	NodeAddressing types.NodeAddressing
+
+	NodeHandler   types.NodeHandler
+	NodeIDHandler types.NodeIDHandler
+	NodeNeighbors types.NodeNeighbors
 
 	// Depend on DeviceManager to ensure devices have been resolved.
 	// This is required until option.Config.GetDevices() has been removed and

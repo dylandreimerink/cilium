@@ -6,7 +6,10 @@ package loader
 import (
 	"github.com/cilium/cilium/pkg/datapath/linux/sysctl"
 	loaderTypes "github.com/cilium/cilium/pkg/datapath/loader/types"
+	datapath "github.com/cilium/cilium/pkg/datapath/types"
 	"github.com/cilium/cilium/pkg/hive/cell"
+	"github.com/cilium/cilium/pkg/node"
+	"github.com/cilium/cilium/pkg/option"
 )
 
 var Cell = cell.Module(
@@ -15,7 +18,23 @@ var Cell = cell.Module(
 	cell.Provide(NewLoader),
 )
 
+type LoaderParams struct {
+	cell.In
+
+	Sysctl         sysctl.Sysctl
+	ConfigWriter   datapath.ConfigWriter
+	DaemonConfig   *option.DaemonConfig
+	nodeHandler    datapath.NodeHandler
+	localNodeStore *node.LocalNodeStore
+}
+
 // NewLoader returns a new loader.
-func NewLoader(sc sysctl.Sysctl) loaderTypes.Loader {
-	return newLoader(sc)
+func NewLoader(params LoaderParams) loaderTypes.Loader {
+	return newLoader(
+		params.Sysctl,
+		params.ConfigWriter,
+		params.DaemonConfig,
+		params.nodeHandler,
+		params.localNodeStore,
+	)
 }

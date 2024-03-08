@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/vishvananda/netlink"
 
@@ -47,7 +48,7 @@ const (
 	preFilterHeaderFileName = "filter_config.h"
 )
 
-func (l *loader) writeNetdevHeader(dir string, o datapath.BaseProgramOwner) error {
+func (l *loader) writeNetdevHeader(dir string) error {
 	headerPath := filepath.Join(dir, netdevHeaderFileName)
 	log.WithField(logfields.Path, headerPath).Debug("writing configuration")
 
@@ -58,13 +59,13 @@ func (l *loader) writeNetdevHeader(dir string, o datapath.BaseProgramOwner) erro
 	}
 	defer f.Close()
 
-	if err := l.templateCache.WriteNetdevConfig(f, o); err != nil {
+	if err := l.templateCache.WriteNetdevConfig(f, l.daemonConfig.Opts); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (l *loader) writeNodeConfigHeader(o datapath.BaseProgramOwner) error {
+func (l *loader) writeNodeConfigHeader(mtu int) error {
 	nodeConfigPath := option.Config.GetNodeConfigPath()
 	f, err := os.Create(nodeConfigPath)
 	if err != nil {
@@ -72,7 +73,7 @@ func (l *loader) writeNodeConfigHeader(o datapath.BaseProgramOwner) error {
 	}
 	defer f.Close()
 
-	if err = l.templateCache.WriteNodeConfig(f, o.LocalConfig()); err != nil {
+	if err = l.templateCache.WriteNodeConfig(f, mtu); err != nil {
 		return fmt.Errorf("failed to write node configuration file at %s: %w", nodeConfigPath, err)
 	}
 	return nil
@@ -316,7 +317,7 @@ func (l *loader) Reinitialize(ctx context.Context, o datapath.BaseProgramOwner, 
 	defer o.GetCompilationLock().Unlock()
 	defer func() { firstInitialization = false }()
 
-	l.init(o.Datapath(), o.LocalConfig())
+	l.init(deviceMTU)
 
 	var nodeIPv4, nodeIPv6 net.IP
 	if option.Config.EnableIPv4 {
@@ -375,12 +376,12 @@ func (l *loader) Reinitialize(ctx context.Context, o datapath.BaseProgramOwner, 
 		return err
 	}
 
-	if err := l.writeNodeConfigHeader(o); err != nil {
+	if err := l.writeNodeConfigHeader(deviceMTU); err != nil {
 		log.WithError(err).Error("Unable to write node config header")
 		return err
 	}
 
-	if err := l.writeNetdevHeader("./", o); err != nil {
+	if err := l.writeNetdevHeader("./"); err != nil {
 		log.WithError(err).Warn("Unable to write netdev header")
 		return err
 	}
@@ -452,7 +453,9 @@ func (l *loader) Reinitialize(ctx context.Context, o datapath.BaseProgramOwner, 
 		return err
 	}
 
-	if err := o.Datapath().Node().NodeConfigurationChanged(*o.LocalConfig()); err != nil {
+	storeCtx, _ := context.WithTimeout(ctx, 5*time.Second)
+	l.localNodeStore.Get(storeCtx)
+	if err := l.nodeHandler.NodeConfigurationChanged(*o.LocalConfig()); err != nil {
 		return err
 	}
 

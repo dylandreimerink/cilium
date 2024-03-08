@@ -76,28 +76,40 @@ type loader struct {
 	hostDpInitializedOnce sync.Once
 	hostDpInitialized     chan struct{}
 
-	sysctl sysctl.Sysctl
+	sysctl         sysctl.Sysctl
+	configWriter   datapath.ConfigWriter
+	daemonConfig   *option.DaemonConfig
+	nodeHandler    datapath.NodeHandler
+	localNodeStore *node.LocalNodeStore
 }
 
-func newLoader(sysctl sysctl.Sysctl) *loader {
+func newLoader(
+	sysctl sysctl.Sysctl,
+	cw datapath.ConfigWriter,
+	dc *option.DaemonConfig,
+	nodeHandler datapath.NodeHandler,
+	localNodeStore *node.LocalNodeStore,
+) *loader {
 	return &loader{
 		hostDpInitialized: make(chan struct{}),
 		sysctl:            sysctl,
+		configWriter:      cw,
+		daemonConfig:      dc,
 	}
 }
 
 // Init initializes the datapath cache with base program hashes derived from
 // the LocalNodeConfiguration.
-func (l *loader) init(dp datapath.ConfigWriter, nodeCfg *datapath.LocalNodeConfiguration) {
+func (l *loader) init(mtu int) {
 	l.once.Do(func() {
-		l.templateCache = newObjectCache(dp, nodeCfg, option.Config.StateDir)
+		l.templateCache = newObjectCache(l.configWriter, mtu, option.Config.StateDir)
 		ignorePrefixes := ignoredELFPrefixes
 		if !option.Config.EnableIPv4 {
 			ignorePrefixes = append(ignorePrefixes, "LXC_IPV4")
 		}
 		elf.IgnoreSymbolPrefixes(ignorePrefixes)
 	})
-	l.templateCache.Update(nodeCfg)
+	l.templateCache.Update(mtu)
 }
 
 func upsertEndpointRoute(ep datapath.Endpoint, ip net.IPNet) error {

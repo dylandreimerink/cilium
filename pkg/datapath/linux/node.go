@@ -27,13 +27,16 @@ import (
 	"github.com/cilium/cilium/pkg/datapath/linux/ipsec"
 	"github.com/cilium/cilium/pkg/datapath/linux/linux_defaults"
 	"github.com/cilium/cilium/pkg/datapath/linux/route"
+	dpTunnel "github.com/cilium/cilium/pkg/datapath/tunnel"
 	datapath "github.com/cilium/cilium/pkg/datapath/types"
+	"github.com/cilium/cilium/pkg/defaults"
 	"github.com/cilium/cilium/pkg/idpool"
 	ipamOption "github.com/cilium/cilium/pkg/ipam/option"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/maps/nodemap"
 	"github.com/cilium/cilium/pkg/maps/tunnel"
+	"github.com/cilium/cilium/pkg/mtu"
 	"github.com/cilium/cilium/pkg/node"
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
 	"github.com/cilium/cilium/pkg/option"
@@ -93,14 +96,17 @@ var (
 // NewNodeHandler returns a new node handler to handle node events and
 // implement the implications in the Linux datapath
 func NewNodeHandler(
-	datapathConfig DatapathConfiguration,
+	tunnelConfig dpTunnel.Config,
 	nodeAddressing datapath.NodeAddressing,
 	nodeMap nodemap.Map,
-	mtu datapath.MTUConfiguration,
-) *linuxNodeHandler {
-	return &linuxNodeHandler{
-		nodeAddressing:         nodeAddressing,
-		datapathConfig:         datapathConfig,
+	mtu mtu.MTU,
+) (datapath.NodeHandler, datapath.NodeIDHandler, datapath.NodeNeighbors) {
+	lnh := &linuxNodeHandler{
+		nodeAddressing: nodeAddressing,
+		datapathConfig: DatapathConfiguration{
+			HostDevice:   defaults.HostDevice,
+			TunnelDevice: tunnelConfig.DeviceName(),
+		},
 		nodeConfig:             datapath.LocalNodeConfiguration{MtuConfig: mtu},
 		nodes:                  map[nodeTypes.Identity]*nodeTypes.Node{},
 		neighNextHopByNode4:    map[nodeTypes.Identity]map[string]string{},
@@ -115,6 +121,8 @@ func NewNodeHandler(
 		ipsecMetricCollector:   ipsec.NewXFRMCollector(),
 		prefixClusterMutatorFn: func(node *nodeTypes.Node) []cmtypes.PrefixClusterOpts { return nil },
 	}
+
+	return lnh, lnh, lnh
 }
 
 func (l *linuxNodeHandler) Name() string {

@@ -11,6 +11,7 @@ import (
 	"io"
 
 	datapath "github.com/cilium/cilium/pkg/datapath/types"
+	"github.com/cilium/cilium/pkg/option"
 )
 
 var (
@@ -41,15 +42,13 @@ func newDatapathHash() *datapathHash {
 //
 //	hash := hashDatapath(dp, nodeCfg, netdevCfg, ep)
 //	hashStr := hash.sumEndpoint(ep)
-func hashDatapath(c datapath.ConfigWriter, nodeCfg *datapath.LocalNodeConfiguration, netdevCfg datapath.DeviceConfiguration, epCfg datapath.EndpointConfiguration) *datapathHash {
+func hashDatapath(c datapath.ConfigWriter, mtu int, opts *option.IntOptions, epCfg datapath.EndpointConfiguration) *datapathHash {
 	d := newDatapathHash()
 
 	// Writes won't fail; it's an in-memory hash.
-	if nodeCfg != nil {
-		_ = c.WriteNodeConfig(d, nodeCfg)
-	}
-	if netdevCfg != nil {
-		_ = c.WriteNetdevConfig(d, netdevCfg)
+	_ = c.WriteNodeConfig(d, mtu)
+	if opts != nil {
+		_ = c.WriteNetdevConfig(d, opts)
 	}
 	if epCfg != nil {
 		_ = c.WriteTemplateConfig(d, epCfg)

@@ -22,6 +22,7 @@ import (
 	"github.com/cilium/cilium/pkg/datapath/linux/sysctl"
 	"github.com/cilium/cilium/pkg/datapath/loader/metrics"
 	"github.com/cilium/cilium/pkg/elf"
+	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/maps/callsmap"
 	"github.com/cilium/cilium/pkg/maps/policymap"
 	"github.com/cilium/cilium/pkg/node"
@@ -139,7 +140,7 @@ func (s *LoaderTestSuite) testCompileAndLoad(c *C, ep *testutils.TestEndpoint) {
 	defer cancel()
 	stats := &metrics.SpanStat{}
 
-	l := newLoader(sysctl.NewDirectSysctl(afero.NewOsFs(), "/proc"))
+	l := newLoader(sysctl.NewDirectSysctl(afero.NewOsFs(), "/proc"), nil, nil)
 	err := l.compileAndLoad(ctx, ep, getDirs(c), stats)
 	c.Assert(err, IsNil)
 }
@@ -207,7 +208,7 @@ func (s *LoaderTestSuite) testCompileFailure(c *C, ep *testutils.TestEndpoint) {
 		}
 	}()
 
-	l := newLoader(sysctl.NewDirectSysctl(afero.NewOsFs(), "/proc"))
+	l := newLoader(sysctl.NewDirectSysctl(afero.NewOsFs(), "/proc"), nil, nil)
 	timeout := time.Now().Add(contextTimeout)
 	var err error
 	stats := &metrics.SpanStat{}
@@ -251,7 +252,7 @@ func BenchmarkCompileAndLoad(b *testing.B) {
 	ctx, cancel := context.WithTimeout(context.Background(), benchTimeout)
 	defer cancel()
 
-	l := newLoader(sysctl.NewDirectSysctl(afero.NewOsFs(), "/proc"))
+	l := newLoader(sysctl.NewDirectSysctl(afero.NewOsFs(), "/proc"), nil, nil)
 	dirInfo := getDirs(b)
 
 	b.ResetTimer()
@@ -329,8 +330,18 @@ func BenchmarkCompileOrLoad(b *testing.B) {
 	}
 	defer os.RemoveAll(epDir)
 
-	l := newLoader(sysctl.NewDirectSysctl(afero.NewOsFs(), "/proc"))
-	l.templateCache = newObjectCache(&config.HeaderfileWriter{}, nil, tmpDir)
+	sysctl := sysctl.NewDirectSysctl(afero.NewOsFs(), "/proc")
+
+	cw, err := config.NewHeaderfileWriter(config.WriterParams{
+		Log:    logging.DefaultLogger,
+		Sysctl: sysctl,
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	l := newLoader(sysctl, cw, &option.DaemonConfig{})
+	l.templateCache = newObjectCache(&config.HeaderfileWriter{}, 1500, tmpDir)
 	if err := l.CompileOrLoad(ctx, &ep, nil); err != nil {
 		log.Warningf("Failure in %s: %s", tmpDir, err)
 		time.Sleep(1 * time.Minute)

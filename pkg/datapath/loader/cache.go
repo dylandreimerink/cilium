@@ -127,20 +127,20 @@ type cachedObject struct {
 	path string
 }
 
-func newObjectCache(c datapath.ConfigWriter, nodeCfg *datapath.LocalNodeConfiguration, workingDir string) *objectCache {
+func newObjectCache(c datapath.ConfigWriter, mtu int, workingDir string) *objectCache {
 	oc := &objectCache{
 		ConfigWriter:     c,
 		workingDirectory: workingDir,
 		objects:          make(map[string]*cachedObject),
 	}
-	oc.Update(nodeCfg)
+	oc.Update(mtu)
 	return oc
 }
 
 // Update may be called to update the base hash for configuration of datapath
 // configuration that applies across the node.
-func (o *objectCache) Update(nodeCfg *datapath.LocalNodeConfiguration) {
-	newHash := hashDatapath(o.ConfigWriter, nodeCfg, nil, nil)
+func (o *objectCache) Update(mtu int) {
+	newHash := hashDatapath(o.ConfigWriter, mtu, nil, nil)
 
 	o.Lock()
 	defer o.Unlock()

@@ -93,7 +93,7 @@ func writeIncludes(w io.Writer) (int, error) {
 }
 
 // WriteNodeConfig writes the local node configuration to the specified writer.
-func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeConfiguration) error {
+func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, mtu int) error {
 	extraMacrosMap := make(dpdef.Map)
 	cDefinesMap := make(dpdef.Map)
 
@@ -255,7 +255,7 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 	}
 
 	cDefinesMap["TRACE_PAYLOAD_LEN"] = fmt.Sprintf("%dULL", option.Config.TracePayloadlen)
-	cDefinesMap["MTU"] = fmt.Sprintf("%d", cfg.MtuConfig.GetDeviceMTU())
+	cDefinesMap["MTU"] = fmt.Sprintf("%d", mtu)
 
 	if option.Config.EnableIPv4 {
 		cDefinesMap["ENABLE_IPV4"] = "1"
@@ -933,8 +933,8 @@ is_l3; })`))
 	return macByIfIndexMacro.String(), isL3DevMacro, nil
 }
 
-func (h *HeaderfileWriter) writeNetdevConfig(w io.Writer, cfg datapath.DeviceConfiguration) {
-	fmt.Fprint(w, cfg.GetOptions().GetFmtList())
+func (h *HeaderfileWriter) writeNetdevConfig(w io.Writer, cfg *option.IntOptions) {
+	fmt.Fprint(w, cfg.GetFmtList())
 
 	if option.Config.EnableEndpointRoutes {
 		fmt.Fprint(w, "#define USE_BPF_PROG_FOR_INGRESS_POLICY 1\n")
@@ -942,7 +942,7 @@ func (h *HeaderfileWriter) writeNetdevConfig(w io.Writer, cfg datapath.DeviceCon
 }
 
 // WriteNetdevConfig writes the BPF configuration for the endpoint to a writer.
-func (h *HeaderfileWriter) WriteNetdevConfig(w io.Writer, cfg datapath.DeviceConfiguration) error {
+func (h *HeaderfileWriter) WriteNetdevConfig(w io.Writer, cfg *option.IntOptions) error {
 	fw := bufio.NewWriter(w)
 	h.writeNetdevConfig(fw, cfg)
 	return fw.Flush()
@@ -1088,7 +1088,7 @@ func (h *HeaderfileWriter) writeTemplateConfig(fw *bufio.Writer, e datapath.Endp
 	// Local delivery metrics should always be set for endpoint programs.
 	fmt.Fprint(fw, "#define LOCAL_DELIVERY_METRICS 1\n")
 
-	h.writeNetdevConfig(fw, e)
+	h.writeNetdevConfig(fw, e.GetOptions())
 
 	return fw.Flush()
 }

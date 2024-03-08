@@ -10,6 +10,7 @@ import (
 	"github.com/cilium/cilium/pkg/datapath/loader/metrics"
 	"github.com/cilium/cilium/pkg/datapath/tunnel"
 	datapath "github.com/cilium/cilium/pkg/datapath/types"
+	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/testutils/mockmaps"
 )
 
@@ -60,12 +61,12 @@ func (f *FakeDatapath) LocalNodeAddressing() datapath.NodeAddressing {
 }
 
 // WriteNodeConfig pretends to write the datapath configuration to the writer.
-func (f *FakeDatapath) WriteNodeConfig(io.Writer, *datapath.LocalNodeConfiguration) error {
+func (f *FakeDatapath) WriteNodeConfig(io.Writer, int) error {
 	return nil
 }
 
 // WriteNetdevConfig pretends to write the netdev configuration to a writer.
-func (f *FakeDatapath) WriteNetdevConfig(io.Writer, datapath.DeviceConfiguration) error {
+func (f *FakeDatapath) WriteNetdevConfig(io.Writer, *option.IntOptions) error {
 	return nil
 }
 
