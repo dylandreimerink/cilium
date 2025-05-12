@@ -121,7 +121,6 @@ bool sock_proto_enabled(__u8 proto)
 }
 
 #ifdef ENABLE_IPV4
-
 static __always_inline int sock4_update_revnat(struct bpf_sock_addr *ctx,
 					       const struct lb4_backend *backend,
 					       const struct lb4_key *orig_key,
@@ -621,7 +620,10 @@ int cil_sock4_getpeername(struct bpf_sock_addr *ctx)
 
 #if defined(ENABLE_IPV6) || defined(ENABLE_IPV4)
 #ifdef ENABLE_IPV6
+<<<<<<< HEAD
 
+=======
+>>>>>>> c833010b3b (bpf: unconditionally define cilium_lb{4,6}_reverse_sk)
 static __always_inline int sock6_update_revnat(struct bpf_sock_addr *ctx,
 					       const struct lb6_backend *backend,
 					       const struct lb6_key *orig_key,
