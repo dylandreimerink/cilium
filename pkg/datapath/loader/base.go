@@ -178,7 +178,7 @@ func cleanCallsMaps(mapNamePattern string) error {
 }
 
 // reinitializeIPSec is used to recompile and load encryption network programs.
-func (l *loader) reinitializeIPSec(lnc *datapath.LocalNodeConfiguration) error {
+func (l *loader) reinitializeIPSec(lnc *datapath.LocalNodeConfiguration, callbacks *CallbackRegistry) error {
 	// We need to take care not to load bpf_network and bpf_host onto the same
 	// device. If devices are required, we load bpf_host and hence don't need
 	// the code below, specific to EncryptInterface. Specifically, we will load
@@ -222,17 +222,31 @@ func (l *loader) reinitializeIPSec(lnc *datapath.LocalNodeConfiguration) error {
 		return fmt.Errorf("loading eBPF ELF %s: %w", networkObj, err)
 	}
 
-	var obj networkObjects
-	commit, err := bpf.LoadAndAssign(l.logger, &obj, spec, &bpf.CollectionOptions{
+	opts := &bpf.CollectionOptions{
 		CollectionOptions: ebpf.CollectionOptions{
 			Maps: ebpf.MapOptions{PinPath: bpf.TCGlobalsPath()},
 		},
 		Constants: config.NewBPFNetwork(nodeConfig(lnc)),
-	})
+	}
+
+	for _, cb := range callbacks.IPSecPreLoad {
+		if err := cb.fn(lnc, spec, opts); err != nil {
+			return fmt.Errorf("pre-load callback %T failed: %w", cb, err)
+		}
+	}
+
+	var obj NetworkObjects
+	commit, err := bpf.LoadAndAssign(l.logger, &obj, spec, opts)
 	if err != nil {
 		return err
 	}
 	defer obj.Close()
+
+	for _, cb := range callbacks.IPSecPreAttach {
+		if err := cb.fn(lnc, obj); err != nil {
+			return fmt.Errorf("post-load callback %T failed: %w", cb, err)
+		}
+	}
 
 	var errs error
 	for _, iface := range interfaces {
@@ -264,7 +278,7 @@ func (l *loader) reinitializeIPSec(lnc *datapath.LocalNodeConfiguration) error {
 	return nil
 }
 
-func reinitializeOverlay(ctx context.Context, logger *slog.Logger, lnc *datapath.LocalNodeConfiguration, tunnelConfig tunnel.Config) error {
+func reinitializeOverlay(ctx context.Context, logger *slog.Logger, lnc *datapath.LocalNodeConfiguration, tunnelConfig tunnel.Config, callbacks *CallbackRegistry) error {
 	// tunnelConfig.EncapProtocol() can be one of tunnel.[Disabled, VXLAN, Geneve]
 	// if it is disabled, the overlay network programs don't have to be (re)initialized
 	if tunnelConfig.EncapProtocol() == tunnel.Disabled {
@@ -281,14 +295,14 @@ func reinitializeOverlay(ctx context.Context, logger *slog.Logger, lnc *datapath
 	// gather compile options for bpf_overlay.c
 	opts := []string{}
 
-	if err := replaceOverlayDatapath(ctx, logger, lnc, opts, link); err != nil {
+	if err := replaceOverlayDatapath(ctx, logger, lnc, opts, link, callbacks); err != nil {
 		return fmt.Errorf("failed to load overlay programs: %w", err)
 	}
 
 	return nil
 }
 
-func reinitializeWireguard(ctx context.Context, logger *slog.Logger, lnc *datapath.LocalNodeConfiguration) (err error) {
+func reinitializeWireguard(ctx context.Context, logger *slog.Logger, lnc *datapath.LocalNodeConfiguration, callbacks *CallbackRegistry) (err error) {
 	if !option.Config.EnableWireguard {
 		cleanCallsMaps("cilium_calls_wireguard*")
 		return
@@ -299,13 +313,13 @@ func reinitializeWireguard(ctx context.Context, logger *slog.Logger, lnc *datapa
 		return fmt.Errorf("failed to retrieve link for interface %s: %w", wgTypes.IfaceName, err)
 	}
 
-	if err := replaceWireguardDatapath(ctx, logger, lnc, link); err != nil {
+	if err := replaceWireguardDatapath(ctx, logger, lnc, link, callbacks); err != nil {
 		return fmt.Errorf("failed to load wireguard programs: %w", err)
 	}
 	return
 }
 
-func reinitializeXDPLocked(ctx context.Context, logger *slog.Logger, lnc *datapath.LocalNodeConfiguration, extraCArgs []string, devices []string) error {
+func reinitializeXDPLocked(ctx context.Context, logger *slog.Logger, lnc *datapath.LocalNodeConfiguration, extraCArgs []string, devices []string, callbacks *CallbackRegistry) error {
 	xdpConfig := lnc.XDPConfig
 	maybeUnloadObsoleteXDPPrograms(logger, devices, xdpConfig.Mode(), bpf.CiliumPath())
 	if xdpConfig.Disabled() {
@@ -320,7 +334,7 @@ func reinitializeXDPLocked(ctx context.Context, logger *slog.Logger, lnc *datapa
 			continue
 		}
 
-		if err := compileAndLoadXDPProg(ctx, logger, lnc, dev, xdpConfig.Mode(), extraCArgs); err != nil {
+		if err := compileAndLoadXDPProg(ctx, logger, lnc, dev, xdpConfig.Mode(), extraCArgs, callbacks); err != nil {
 			if option.Config.NodePortAcceleration == option.XDPModeBestEffort {
 				logger.Info("Failed to attach XDP program, ignoring due to best-effort mode",
 					logfields.Error, err,
@@ -343,7 +357,7 @@ func (l *loader) ReinitializeXDP(ctx context.Context, lnc *datapath.LocalNodeCon
 	defer l.compilationLock.Unlock()
 	devices := lnc.DeviceNames()
 
-	return reinitializeXDPLocked(ctx, l.logger, lnc, extraCArgs, devices)
+	return reinitializeXDPLocked(ctx, l.logger, lnc, extraCArgs, devices, l.callbacks)
 }
 
 func (l *loader) ReinitializeHostDev(ctx context.Context, mtu int) error {
@@ -480,7 +494,7 @@ func (l *loader) Reinitialize(ctx context.Context, lnc *datapath.LocalNodeConfig
 	}
 
 	extraArgs := []string{"-Dcapture_enabled=0"}
-	if err := reinitializeXDPLocked(ctx, l.logger, lnc, extraArgs, devices); err != nil {
+	if err := reinitializeXDPLocked(ctx, l.logger, lnc, extraArgs, devices, l.callbacks); err != nil {
 		logging.Fatal(l.logger, "Failed to compile XDP program", logfields.Error, err)
 	}
 
@@ -499,16 +513,16 @@ func (l *loader) Reinitialize(ctx context.Context, lnc *datapath.LocalNodeConfig
 			logging.Fatal(l.logger, "failed to compile encryption programs", logfields.Error, err)
 		}
 
-		if err := l.reinitializeIPSec(lnc); err != nil {
+		if err := l.reinitializeIPSec(lnc, l.callbacks); err != nil {
 			return err
 		}
 	}
 
-	if err := reinitializeOverlay(ctx, l.logger, lnc, tunnelConfig); err != nil {
+	if err := reinitializeOverlay(ctx, l.logger, lnc, tunnelConfig, l.callbacks); err != nil {
 		return err
 	}
 
-	if err := reinitializeWireguard(ctx, l.logger, lnc); err != nil {
+	if err := reinitializeWireguard(ctx, l.logger, lnc, l.callbacks); err != nil {
 		return err
 	}
 

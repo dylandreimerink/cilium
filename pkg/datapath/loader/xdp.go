@@ -111,7 +111,7 @@ func xdpCompileArgs(extraCArgs []string) ([]string, error) {
 }
 
 // compileAndLoadXDPProg compiles bpf_xdp.c for the given XDP device and loads it.
-func compileAndLoadXDPProg(ctx context.Context, logger *slog.Logger, lnc *datapath.LocalNodeConfiguration, xdpDev string, xdpMode xdp.Mode, extraCArgs []string) error {
+func compileAndLoadXDPProg(ctx context.Context, logger *slog.Logger, lnc *datapath.LocalNodeConfiguration, xdpDev string, xdpMode xdp.Mode, extraCArgs []string, callbacks *CallbackRegistry) error {
 	args, err := xdpCompileArgs(extraCArgs)
 	if err != nil {
 		return fmt.Errorf("failed to derive XDP compile extra args: %w", err)
@@ -152,8 +152,7 @@ func compileAndLoadXDPProg(ctx context.Context, logger *slog.Logger, lnc *datapa
 	cfg.InterfaceIfindex = uint32(iface.Attrs().Index)
 	cfg.DeviceMTU = uint16(iface.Attrs().MTU)
 
-	var obj xdpObjects
-	commit, err := bpf.LoadAndAssign(logger, &obj, spec, &bpf.CollectionOptions{
+	opts := &bpf.CollectionOptions{
 		Constants: cfg,
 		MapRenames: map[string]string{
 			"cilium_calls": fmt.Sprintf("cilium_calls_xdp_%d", iface.Attrs().Index),
@@ -161,11 +160,26 @@ func compileAndLoadXDPProg(ctx context.Context, logger *slog.Logger, lnc *datapa
 		CollectionOptions: ebpf.CollectionOptions{
 			Maps: ebpf.MapOptions{PinPath: bpf.TCGlobalsPath()},
 		},
-	})
+	}
+
+	for _, cb := range callbacks.XDPPreLoad {
+		if err := cb.fn(lnc, iface, spec, opts); err != nil {
+			return fmt.Errorf("pre-loading XDP callback %T: %w", cb, err)
+		}
+	}
+
+	var obj XDPObjects
+	commit, err := bpf.LoadAndAssign(logger, &obj, spec, opts)
 	if err != nil {
 		return err
 	}
 	defer obj.Close()
+
+	for _, cb := range callbacks.XDPPreAttach {
+		if err := cb.fn(lnc, iface, obj); err != nil {
+			return fmt.Errorf("pre-attaching XDP callback %T: %w", cb, err)
+		}
+	}
 
 	if err := attachXDPProgram(logger, iface, obj.Entrypoint, symbolFromHostNetdevXDP,
 		bpffsDeviceLinksDir(bpf.CiliumPath(), iface), xdpConfigModeToFlag(xdpMode)); err != nil {

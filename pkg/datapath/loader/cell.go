@@ -15,6 +15,7 @@ var Cell = cell.Module(
 
 	cell.Provide(NewLoader),
 	cell.Provide(NewCompilationLock),
+	cell.Provide(NewCallbackRegistry),
 )
 
 // NewLoader returns a new loader.
