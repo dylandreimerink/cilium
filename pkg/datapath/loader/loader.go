@@ -396,11 +396,6 @@ func attachCiliumHost(logger *slog.Logger, ep datapath.Endpoint, lnc *datapath.L
 		}
 	}
 
-	// Insert host endpoint policy program.
-	if err := hostObj.PolicyMap.Update(uint32(ep.GetID()), hostObj.PolicyProg, ebpf.UpdateAny); err != nil {
-		return fmt.Errorf("inserting host endpoint policy program: %w", err)
-	}
-
 	// Attach cil_to_host to cilium_host ingress.
 	if err := attachSKBProgram(logger, host, hostObj.ToHost, symbolToHostEp,
 		bpffsDeviceLinksDir(bpf.CiliumPath(), host), netlink.HANDLE_MIN_INGRESS, option.Config.EnableTCX); err != nil {
@@ -674,20 +669,6 @@ func reloadEndpoint(logger *slog.Logger, ep datapath.Endpoint, lnc *datapath.Loc
 		if err := cb.fn(ep, lnc, obj); err != nil {
 			return fmt.Errorf("pre-attaching endpoint callback %T: %w", cb, err)
 		}
-	}
-
-	// Insert policy programs before attaching entrypoints to tc hooks.
-	// Inserting a policy program is considered an attachment, since it makes
-	// the code reachable by bpf_host when it evaluates policy for the endpoint.
-	// All internal tail call plumbing needs to be done before this point.
-	// If the agent dies uncleanly after the first program has been inserted,
-	// the endpoint's connectivity will be partially broken or exhibit undefined
-	// behaviour like missed tail calls or drops.
-	if err := obj.PolicyMap.Update(uint32(ep.GetID()), obj.PolicyProg, ebpf.UpdateAny); err != nil {
-		return fmt.Errorf("inserting endpoint policy program: %w", err)
-	}
-	if err := obj.EgressPolicyMap.Update(uint32(ep.GetID()), obj.EgressPolicyProg, ebpf.UpdateAny); err != nil {
-		return fmt.Errorf("inserting endpoint egress policy program: %w", err)
 	}
 
 	iface, err := safenetlink.LinkByName(device)

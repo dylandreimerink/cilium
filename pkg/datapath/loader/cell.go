@@ -16,6 +16,8 @@ var Cell = cell.Module(
 	cell.Provide(NewLoader),
 	cell.Provide(NewCompilationLock),
 	cell.Provide(NewCallbackRegistry),
+
+	cell.Invoke(policyMapCallbacks),
 )
 
 // NewLoader returns a new loader.
