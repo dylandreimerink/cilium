@@ -18,22 +18,28 @@ type BPFHost struct {
 	// Ifindex of the interface the bpf program is attached to.
 	InterfaceIfindex uint32 `config:"interface_ifindex"`
 	// MAC address of the interface the bpf program is attached to.
-	InterfaceMAC [8]byte `config:"interface_mac"`
+	InterfaceMAC [8]uint8 `config:"interface_mac"`
 	// Masquerade address for IPv4 traffic.
-	NATIPv4Masquerade [4]byte `config:"nat_ipv4_masquerade"`
+	NATIPv4Masquerade [4]uint8 `config:"nat_ipv4_masquerade"`
 	// Masquerade address for IPv6 traffic.
-	NATIPv6Masquerade [16]byte `config:"nat_ipv6_masquerade"`
+	NATIPv6Masquerade [16]uint8 `config:"nat_ipv6_masquerade"`
 	// Pull security context from IP cache.
 	SecctxFromIPCache bool `config:"secctx_from_ipcache"`
 	// The endpoint's security label.
 	SecurityLabel uint32 `config:"security_label"`
+	// List of allowed VLAN IDs and interfaces.
+	VlanFilter [5]struct { Ifindex uint32; VlanID uint32 } `config:"vlan_filter"`
+	// Enable VLAN filtering for host programs.
+	VlanFilterEnabled bool `config:"vlan_filter_enabled"`
 
 	Node
 }
 
 func NewBPFHost(node Node) *BPFHost {
-	return &BPFHost{0x5dc, 0xe, 0x0, [8]byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
-		[4]byte{0x0, 0x0, 0x0, 0x0},
-		[16]byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
-		false, 0x0, node}
+	return &BPFHost{0x5dc, 0xe, 0x0, [8]uint8{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+		[4]uint8{0x0, 0x0, 0x0, 0x0},
+		[16]uint8{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
+		false, 0x0,
+		[5]struct { Ifindex uint32; VlanID uint32 }{struct { Ifindex uint32; VlanID uint32 }{Ifindex:0x74, VlanID:0xfa0}, struct { Ifindex uint32; VlanID uint32 }{Ifindex:0x74, VlanID:0xfa1}, struct { Ifindex uint32; VlanID uint32 }{Ifindex:0x75, VlanID:0xfa3}, struct { Ifindex uint32; VlanID uint32 }{Ifindex:0x75, VlanID:0xfa4}, struct { Ifindex uint32; VlanID uint32 }{Ifindex:0x75, VlanID:0xfa5}},
+		false, node}
 }

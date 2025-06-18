@@ -34,8 +34,12 @@ func (d datapathHash) hashEndpoint(c datapath.ConfigWriter, nodeCfg *datapath.Lo
 	// Include endpoint configuration in the hash, otherwise different runtime
 	// configurations will hash to the same value and the update will be skipped.
 	if epCfg.IsHost() {
-		cfg, _ := ciliumHostRewrites(epCfg, nodeCfg)
-		_, err := fmt.Fprintf(h, "%+v", cfg)
+		cfg, _, err := ciliumHostRewrites(epCfg, nodeCfg)
+		if err != nil {
+			return "", fmt.Errorf("hashing host rewrites: %w", err)
+		}
+
+		_, err = fmt.Fprintf(h, "%+v", cfg)
 		if err != nil {
 			return "", fmt.Errorf("hashing host rewrites: %w", err)
 		}

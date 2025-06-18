@@ -172,7 +172,7 @@ func bpfMasqAddrs(ifName string, cfg *datapath.LocalNodeConfiguration) (masq4, m
 
 // netdevRewrites prepares configuration data for attaching bpf_host.c to the
 // specified externally-facing network device.
-func netdevRewrites(ep datapath.EndpointConfiguration, lnc *datapath.LocalNodeConfiguration, link netlink.Link) (*config.BPFHost, map[string]string) {
+func netdevRewrites(ep datapath.EndpointConfiguration, lnc *datapath.LocalNodeConfiguration, link netlink.Link) (*config.BPFHost, map[string]string, error) {
 	cfg := config.NewBPFHost(nodeConfig(lnc))
 
 	// External devices can be L2-less, in which case it won't have a MAC address
@@ -205,6 +205,10 @@ func netdevRewrites(ep datapath.EndpointConfiguration, lnc *datapath.LocalNodeCo
 		}
 	}
 
+	if err := vlanFilterConfig(lnc, cfg); err != nil {
+		return nil, nil, fmt.Errorf("configuring VLAN filter: %w", err)
+	}
+
 	renames := map[string]string{
 		// Rename the calls map to include the device's ifindex.
 		"cilium_calls": bpf.LocalMapName(callsmap.NetdevMapName, uint16(ifindex)),
@@ -212,7 +216,7 @@ func netdevRewrites(ep datapath.EndpointConfiguration, lnc *datapath.LocalNodeCo
 		"cilium_policy_v2": bpf.LocalMapName(policymap.MapName, uint16(ep.GetID())),
 	}
 
-	return cfg, renames
+	return cfg, renames, nil
 }
 
 func isObsoleteDev(dev string, devices []string) bool {
@@ -332,7 +336,7 @@ func reloadHostEndpoint(logger *slog.Logger, ep datapath.Endpoint, lnc *datapath
 
 // ciliumHostRewrites prepares configuration data for attaching bpf_host.c to
 // the cilium_host network device.
-func ciliumHostRewrites(ep datapath.EndpointConfiguration, lnc *datapath.LocalNodeConfiguration) (*config.BPFHost, map[string]string) {
+func ciliumHostRewrites(ep datapath.EndpointConfiguration, lnc *datapath.LocalNodeConfiguration) (*config.BPFHost, map[string]string, error) {
 	cfg := config.NewBPFHost(nodeConfig(lnc))
 
 	em := ep.GetNodeMAC()
@@ -345,13 +349,17 @@ func ciliumHostRewrites(ep datapath.EndpointConfiguration, lnc *datapath.LocalNo
 
 	cfg.SecurityLabel = ep.GetIdentity().Uint32()
 
+	if err := vlanFilterConfig(lnc, cfg); err != nil {
+		return nil, nil, fmt.Errorf("configuring VLAN filter: %w", err)
+	}
+
 	renames := map[string]string{
 		// Rename calls and policy maps to include the host endpoint's id.
 		"cilium_calls":     bpf.LocalMapName(callsmap.HostMapName, uint16(ep.GetID())),
 		"cilium_policy_v2": bpf.LocalMapName(policymap.MapName, uint16(ep.GetID())),
 	}
 
-	return cfg, renames
+	return cfg, renames, nil
 }
 
 // attachCiliumHost inserts the host endpoint's policy program into the global
@@ -362,7 +370,10 @@ func attachCiliumHost(logger *slog.Logger, ep datapath.Endpoint, lnc *datapath.L
 		return fmt.Errorf("retrieving device %s: %w", ep.InterfaceName(), err)
 	}
 
-	co, renames := ciliumHostRewrites(ep, lnc)
+	co, renames, err := ciliumHostRewrites(ep, lnc)
+	if err != nil {
+		return fmt.Errorf("cilium_host rewrites: %w", err)
+	}
 
 	var hostObj hostObjects
 	commit, err := bpf.LoadAndAssign(logger, &hostObj, spec, &bpf.CollectionOptions{
@@ -402,7 +413,7 @@ func attachCiliumHost(logger *slog.Logger, ep datapath.Endpoint, lnc *datapath.L
 
 // ciliumNetRewrites prepares configuration data for attaching bpf_host.c to
 // the cilium_net network device.
-func ciliumNetRewrites(ep datapath.EndpointConfiguration, lnc *datapath.LocalNodeConfiguration, link netlink.Link) (*config.BPFHost, map[string]string) {
+func ciliumNetRewrites(ep datapath.EndpointConfiguration, lnc *datapath.LocalNodeConfiguration, link netlink.Link) (*config.BPFHost, map[string]string, error) {
 	cfg := config.NewBPFHost(nodeConfig(lnc))
 
 	cfg.SecurityLabel = ep.GetIdentity().Uint32()
@@ -420,6 +431,10 @@ func ciliumNetRewrites(ep datapath.EndpointConfiguration, lnc *datapath.LocalNod
 	ifindex := link.Attrs().Index
 	cfg.InterfaceIfindex = uint32(ifindex)
 
+	if err := vlanFilterConfig(lnc, cfg); err != nil {
+		return nil, nil, fmt.Errorf("configuring VLAN filter: %w", err)
+	}
+
 	renames := map[string]string{
 		// Rename the calls map to include cilium_net's ifindex.
 		"cilium_calls": bpf.LocalMapName(callsmap.NetdevMapName, uint16(ifindex)),
@@ -427,7 +442,74 @@ func ciliumNetRewrites(ep datapath.EndpointConfiguration, lnc *datapath.LocalNod
 		"cilium_policy_v2": bpf.LocalMapName(policymap.MapName, uint16(ep.GetID())),
 	}
 
-	return cfg, renames
+	return cfg, renames, nil
+}
+
+func vlanFilterConfig(lnc *datapath.LocalNodeConfiguration, cfg *config.BPFHost) error {
+	devices := make(map[int]bool)
+	for _, device := range lnc.Devices {
+		devices[device.Index] = true
+	}
+
+	allowedVlans := make(map[int]bool)
+	for _, vlanId := range option.Config.VLANBPFBypass {
+		allowedVlans[vlanId] = true
+	}
+
+	// allow all vlan id's, disable the filter
+	if allowedVlans[0] {
+		cfg.VlanFilterEnabled = false
+		return nil
+	}
+
+	type ifIndexAndVlan struct {
+		IfIndex int
+		VlanId  int
+	}
+	var vlansByIfIndex []ifIndexAndVlan
+
+	links, err := safenetlink.LinkList()
+	if err != nil {
+		return fmt.Errorf("listing network interfaces: %w", err)
+	}
+
+	for _, l := range links {
+		vlan, ok := l.(*netlink.Vlan)
+		// if it's vlan device and we're controlling vlan main device
+		// and either all vlans are allowed, or we're controlling vlan device or vlan is explicitly allowed
+		if ok && devices[vlan.ParentIndex] && (devices[vlan.Index] || allowedVlans[vlan.VlanId]) {
+			vlansByIfIndex = append(vlansByIfIndex, ifIndexAndVlan{
+				IfIndex: vlan.ParentIndex,
+				VlanId:  vlan.VlanId,
+			})
+		}
+	}
+
+	slices.SortStableFunc(vlansByIfIndex, func(a, b ifIndexAndVlan) int {
+		if a.IfIndex < b.IfIndex {
+			return a.IfIndex - b.IfIndex
+		}
+		return a.VlanId - b.VlanId
+	})
+
+	if len(vlansByIfIndex) == 0 {
+		cfg.VlanFilterEnabled = false
+		return nil
+	} else if len(vlansByIfIndex) > 5 {
+		return fmt.Errorf("allowed VLAN list is too big - %d entries, please use '--vlan-bpf-bypass 0' in order to allow all available VLANs", len(vlansByIfIndex))
+	} else {
+		for i, vlan := range vlansByIfIndex {
+			cfg.VlanFilter[i] = struct {
+				Ifindex uint32
+				VlanID  uint32
+			}{
+				Ifindex: uint32(vlan.IfIndex),
+				VlanID:  uint32(vlan.VlanId),
+			}
+		}
+	}
+
+	return nil
 }
 
 // attachCiliumNet attaches programs from bpf_host.c to cilium_net.
@@ -437,7 +519,10 @@ func attachCiliumNet(logger *slog.Logger, ep datapath.Endpoint, lnc *datapath.Lo
 		return fmt.Errorf("retrieving device %s: %w", defaults.SecondHostDevice, err)
 	}
 
-	co, renames := ciliumNetRewrites(ep, lnc, net)
+	co, renames, err := ciliumNetRewrites(ep, lnc, net)
+	if err != nil {
+		return fmt.Errorf("cilium_net rewrites: %w", err)
+	}
 
 	var netObj hostNetObjects
 	commit, err := bpf.LoadAndAssign(logger, &netObj, spec, &bpf.CollectionOptions{
@@ -499,7 +584,10 @@ func attachNetworkDevices(logger *slog.Logger, ep datapath.Endpoint, lnc *datapa
 
 		linkDir := bpffsDeviceLinksDir(bpf.CiliumPath(), iface)
 
-		co, renames := netdevRewrites(ep, lnc, iface)
+		co, renames, err := netdevRewrites(ep, lnc, iface)
+		if err != nil {
+			return fmt.Errorf("netdev rewrites: %w", err)
+		}
 
 		var netdevObj hostNetdevObjects
 		commit, err := bpf.LoadAndAssign(logger, &netdevObj, spec, &bpf.CollectionOptions{

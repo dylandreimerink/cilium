@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -79,7 +80,7 @@ func varsToStruct(spec *ebpf.CollectionSpec, name, kind, comment string, embeds 
 			return "", fmt.Errorf("variable %s has no doc comment", n)
 		}
 
-		typ, err := btfVarGoType(v.Type())
+		typ, err := btfGoType(v.Type().Type)
 		if err != nil {
 			return "", fmt.Errorf("variable %s: getting Go type: %w", n, err)
 		}
@@ -94,7 +95,7 @@ func varsToStruct(spec *ebpf.CollectionSpec, name, kind, comment string, embeds 
 			return "", fmt.Errorf("variable %s: getting default Go value: %w", n, err)
 		}
 
-		fields = append(fields, field{comment, camelCase(n), n, typ, goValueLiteral(defValue)})
+		fields = append(fields, field{comment, camelCase(n), n, typ.String(), goValueLiteral(defValue)})
 	}
 
 	slices.SortStableFunc(fields, func(a, b field) int {
@@ -148,58 +149,17 @@ func varsToStruct(spec *ebpf.CollectionSpec, name, kind, comment string, embeds 
 
 // varGoValue returns the Go value of a variable as an any.
 func varGoValue(v *ebpf.VariableSpec) (any, error) {
-	switch t := btf.UnderlyingType(v.Type().Type).(type) {
-	case *btf.Int:
-		switch t.Encoding {
-		case btf.Signed:
-			switch t.Size {
-			case 1:
-				return getValue[int8](v)
-			case 2:
-				return getValue[int16](v)
-			case 4:
-				return getValue[int32](v)
-			case 8:
-				return getValue[int64](v)
-			default:
-				return nil, fmt.Errorf("unsupported signed integer size %d", t.Size)
-			}
-		case btf.Unsigned:
-			switch t.Size {
-			case 1:
-				return getValue[uint8](v)
-			case 2:
-				return getValue[uint16](v)
-			case 4:
-				return getValue[uint32](v)
-			case 8:
-				return getValue[uint64](v)
-			default:
-				return nil, fmt.Errorf("unsupported unsigned integer size %d", t.Size)
-			}
-		case btf.Bool:
-			return getValue[bool](v)
-		default:
-			return nil, fmt.Errorf("unsupported encoding %v", t.Encoding)
-		}
-
-	case *btf.Union:
-		s := make([]byte, t.Size)
-		if err := v.Get(&s); err != nil {
-			return nil, fmt.Errorf("getting value: %w", err)
-		}
-		return s, nil
-
-	default:
-		return "", fmt.Errorf("unsupported type %T", t)
+	typ, err := btfGoType(v.Type().Type)
+	if err != nil {
+		return nil, fmt.Errorf("getting Go type: %w", err)
 	}
-}
 
-func getValue[T comparable](v *ebpf.VariableSpec) (out T, err error) {
-	if err := v.Get(&out); err != nil {
-		return out, fmt.Errorf("getting value: %w", err)
+	valuePtr := reflect.New(typ).Interface()
+	if err := v.Get(valuePtr); err != nil {
+		return nil, fmt.Errorf("getting value: %w", err)
 	}
-	return out, nil
+
+	return reflect.ValueOf(valuePtr).Elem().Interface(), nil
 }
 
 // camelCase converts a string like "foo_bar" to "FooBar". It capitalizes the
@@ -271,37 +231,107 @@ func sentencify(s string) string {
 	return s
 }
 
-// btfVarGoType converts the type of an integer btf.Var to its equivalent Go
-// type name.
-func btfVarGoType(v *btf.Var) (string, error) {
-	switch t := btf.UnderlyingType(v.Type).(type) {
+func btfGoType(t btf.Type) (reflect.Type, error) {
+	switch t := btf.UnderlyingType(t).(type) {
 	case *btf.Int:
 		if t.Encoding == btf.Char {
-			return "byte", nil
+			return reflect.TypeFor[byte](), nil
 		}
 
 		if t.Encoding == btf.Bool {
-			return "bool", nil
+			return reflect.TypeFor[bool](), nil
 		}
 
 		if t.Size > 8 {
-			return "", fmt.Errorf("unsupported size %d", t.Size)
+			return nil, fmt.Errorf("unsupported size %d", t.Size)
 		}
 
-		base := "int"
-		if t.Encoding == btf.Unsigned {
-			base = "uint"
+		switch t.Size {
+		case 1:
+			if t.Encoding == btf.Unsigned {
+				return reflect.TypeFor[uint8](), nil
+			}
+			return reflect.TypeFor[int8](), nil
+		case 2:
+			if t.Encoding == btf.Unsigned {
+				return reflect.TypeFor[uint16](), nil
+			}
+			return reflect.TypeFor[int16](), nil
+		case 4:
+			if t.Encoding == btf.Unsigned {
+				return reflect.TypeFor[uint32](), nil
+			}
+			return reflect.TypeFor[int32](), nil
+		case 8:
+			if t.Encoding == btf.Unsigned {
+				return reflect.TypeFor[uint64](), nil
+			}
+			return reflect.TypeFor[int64](), nil
+		default:
+			return nil, fmt.Errorf("unsupported size %d", t.Size)
 		}
-		return fmt.Sprintf("%s%d", base, t.Size*8), nil
 
 	case *btf.Union:
 		// Unions can't be represented in Go and are most often used for accessing
 		// subfields of addresses. Emit a fixed-size byte array instead.
-		return fmt.Sprintf("[%d]byte", t.Size), nil
+		return reflect.ArrayOf(int(t.Size), reflect.TypeFor[byte]()), nil
 
-	default:
-		return "", fmt.Errorf("unsupported type %T", btf.UnderlyingType(v.Type))
+	case *btf.Array:
+		sub, err := btfGoType(t.Type)
+		if err != nil {
+			return nil, fmt.Errorf("array type %v: %w", t.Type, err)
+		}
+		if t.Nelems <= 0 {
+			return nil, fmt.Errorf("array with non-positive number of elements %d", t.Nelems)
+		}
+		return reflect.ArrayOf(int(t.Nelems), sub), nil
+
+	case *btf.Struct:
+		var structFields []reflect.StructField
+		paddingFieldCount := 0
+		for i, field := range t.Members {
+			if field.Name == "" {
+				return nil, fmt.Errorf("struct field with no name")
+			}
+
+			fieldType, err := btfGoType(field.Type)
+			if err != nil {
+				return nil, fmt.Errorf("struct field %s: %w", field.Name, err)
+			}
+
+			structFields = append(structFields, reflect.StructField{
+				Name: camelCase(field.Name),
+				Type: fieldType,
+			})
+
+			var next int
+			if i+1 < len(t.Members) {
+				next = int(t.Members[i+1].Offset / 8)
+			} else {
+				// If this is the last field, use the size of the struct to determine
+				// the padding.
+				next = int(t.Size)
+			}
+
+			fieldSize, err := btf.Sizeof(field.Type)
+			if err != nil {
+				return nil, fmt.Errorf("struct field %s: getting size: %w", field.Name, err)
+			}
+
+			paddingSize := next - (int(field.Offset/8) + fieldSize)
+			if paddingSize > 0 {
+				structFields = append(structFields, reflect.StructField{
+					Name: fmt.Sprintf("Pad%d", paddingFieldCount),
+					Type: reflect.ArrayOf(int(paddingSize), reflect.TypeFor[byte]()),
+				})
+				paddingFieldCount++
+			}
+		}
+
+		return reflect.StructOf(structFields), nil
 	}
+
+	return nil, fmt.Errorf("unsupported type %T", t)
 }
 
 // goValueLiteral returns a string representation of a Go value.

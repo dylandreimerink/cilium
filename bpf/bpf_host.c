@@ -63,8 +63,30 @@
 #define FROM_HOST_FLAG_NEED_HOSTFW (1 << 1)
 #define FROM_HOST_FLAG_HOST_ID (1 << 2)
 
-static __always_inline bool allow_vlan(__u32 __maybe_unused ifindex, __u32 __maybe_unused vlan_id) {
-	VLAN_FILTER(ifindex, vlan_id);
+typedef struct {
+        __u32 ifindex;
+        __u32 vlan_id;
+} vlan_filter_value;
+
+#define MAX_VLAN_FILTER 5
+typedef vlan_filter_value vlan_filter_t[MAX_VLAN_FILTER];
+
+DECLARE_CONFIG(bool, vlan_filter_enabled, "Enable VLAN filtering for host programs")
+DECLARE_CONFIG(vlan_filter_t, vlan_filter, "List of allowed VLAN IDs and interfaces")
+
+static __always_inline bool allow_vlan(__u32 ifindex, __u32 vlan_id) {
+	int i = 0;
+	if (!CONFIG(vlan_filter_enabled))
+		return true;
+
+	#pragma unroll
+	for (i = 0; i < MAX_VLAN_FILTER; i++) {
+		vlan_filter_value vlan = CONFIG(vlan_filter)[i];
+		if (vlan.ifindex == ifindex && vlan.vlan_id == vlan_id)
+			return true;
+	}
+
+	return false;
 }
 
 #if defined(ENABLE_IPV4) || defined(ENABLE_IPV6)
