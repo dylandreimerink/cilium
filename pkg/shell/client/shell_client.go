@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 
 	"github.com/cilium/hive/script"
@@ -164,6 +165,12 @@ func interactiveShell() {
 		// long running commands with ctrl-c.
 		closed := false
 		for !closed {
+			console.AutoCompleteCallback = autocomplete(console, conn, bio, &closed)
+			if closed {
+				close(stop)
+				return
+			}
+
 			line, err := console.ReadLine()
 			if err != nil {
 				close(stop)
@@ -226,4 +233,97 @@ func printShellGreeting(term *term.Terminal) {
 	fmt.Fprint(term, Green+" \\__"+Blue+"/¯¯\\"+Magenta+"__/"+Reset+"\n")
 	fmt.Fprint(term, Blue+Blue+Blue+"    \\__/"+Reset+"\n")
 	fmt.Fprint(term, "\n")
+}
+
+func autocomplete(console *term.Terminal, conn net.Conn, bio *bufio.Reader, closed *bool) func(line string, pos int, key rune) (newLine string, newPos int, ok bool) {
+	var (
+		suggestionIndex int
+		suggestionPos   int = -1
+	)
+	return func(line string, pos int, key rune) (string, int, bool) {
+		switch key {
+		case '\t':
+		default:
+			suggestionIndex = 0
+			suggestionPos = -1
+
+			// Only handle tab completion.
+			return line, pos, false
+		}
+
+		// If we have not queried the server yet, or the line has changed, we need to
+		// query the server for suggestions.
+		if suggestionPos == -1 {
+			suggestionPos = pos
+		}
+
+		if suggestionPos > len(line) {
+			suggestionPos = len(line)
+		}
+
+		line = line[:suggestionPos]
+
+		// If the line does not contain a space, we are still typing out the initial command.
+		if !strings.Contains(line, " ") {
+			// Ask server for suggestions of root commands.
+			if _, err := fmt.Fprintln(conn, "help -a "+line); err != nil {
+				*closed = true
+				return "", 0, false
+			}
+		} else {
+			cmd, args, _ := strings.Cut(line, " ")
+			args = strings.Replace(args, "'", "\\'", -1) // Escape single quotes for the shell.
+			// Ask server for suggestions for the specific command.
+			if _, err := fmt.Fprintf(conn, "%s --autocomplete='%s'\n", cmd, args); err != nil {
+				*closed = true
+				return "", 0, false
+			}
+		}
+
+		var suggestions []string
+		suggestion := ""
+		for {
+			lineBytes, isPrefix, err := bio.ReadLine()
+			if err != nil {
+				// Connection closed!
+				*closed = true
+				return "", 0, false
+			}
+			line := string(lineBytes)
+
+			if line == "[stdout]" || line == "[stderr]" {
+				// Commands that write to "stdout" instead of the log show the [stdout] as
+				// the first line. This is useful information in tests, but not useful in
+				// the shell, so just skip this.
+				continue
+			}
+
+			line, ended := strings.CutSuffix(line, endMarker)
+			suggestion += line
+			if !isPrefix {
+				if suggestion != "" {
+					suggestions = append(suggestions, suggestion)
+				}
+				suggestion = ""
+			}
+			if ended {
+				break
+			}
+		}
+
+		slices.Sort(suggestions)
+
+		if suggestionIndex > len(suggestions)-1 {
+			suggestionIndex = 0
+		}
+
+		if len(suggestions) == 0 {
+			// No suggestions available.
+			return line, pos, false
+		}
+
+		currentSuggestion := suggestions[suggestionIndex]
+		suggestionIndex++
+		return currentSuggestion, len(currentSuggestion), true
+	}
 }

@@ -148,6 +148,8 @@ func (sh shell) handleConn(ctx context.Context, conn net.Conn) {
 		case "stop", "exit", "quit":
 			return
 		}
+
+		sh.log.Info("Received command", "command", line)
 		err = sh.engine.ExecuteLine(s, line, conn)
 		if err != nil {
 			_, err = fmt.Fprintln(conn, err)

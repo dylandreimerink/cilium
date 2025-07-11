@@ -1,6 +1,6 @@
 module github.com/cilium/cilium
 
-go 1.24.0
+go 1.24.1
 
 require (
 	github.com/AdaLogics/go-fuzz-headers v0.0.0-20240806141605-e8a1dd7889d6
@@ -22,7 +22,7 @@ require (
 	github.com/cilium/ebpf v0.18.1-0.20250623141833-9958a4f58fb4
 	github.com/cilium/endpointslice-controller v0.0.0-20250410163339-ffb33e27879c
 	github.com/cilium/fake v0.7.0
-	github.com/cilium/hive v0.0.0-20250611195437-5a5dacdfb354
+	github.com/cilium/hive v0.0.0-20250714133434-714c023ea831
 	github.com/cilium/lumberjack/v2 v2.4.1
 	github.com/cilium/proxy v0.0.0-20250623105955-2136f59a4ea1
 	github.com/cilium/statedb v0.4.4
@@ -333,3 +333,7 @@ tool (
 	k8s.io/code-generator/cmd/validation-gen
 	sigs.k8s.io/controller-tools/cmd/controller-gen
 )
+
+replace github.com/cilium/hive v0.0.0-20250611195437-5a5dacdfb354 => /home/dylanr/Documents/work/hive
+
+replace github.com/cilium/statedb v0.4.4 => /home/dylanr/Documents/work/statedb
