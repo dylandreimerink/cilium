@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright Authors of Cilium
 
+//go:generate go run github.com/cilium/cilium/tools/dpgen maps ../../../bpf/bpf_host.o ../../../bpf/bpf_lxc.o ../../../bpf/bpf_network.o ../../../bpf/bpf_overlay.o ../../../bpf/bpf_wireguard.o ../../../bpf/bpf_sock.o --package registry --out .
+
 package registry
 
 import (
-	"bytes"
 	_ "embed"
 	"errors"
 	"fmt"
@@ -22,9 +23,6 @@ var Cell = cell.Module(
 	"Registry of eBPF map specifications that can be modified",
 	cell.Provide(NewMapSpecRegistry),
 )
-
-//go:embed bpf_maps.o
-var bpfMapsELF []byte
 
 // MapSpecRegistry contains eBPF map specifications for all maps in the datapath that may
 // be modified at runtime. This registry allows cells to modify map specifications
@@ -45,13 +43,13 @@ type MapSpecRegistry struct {
 }
 
 func NewMapSpecRegistry(lifecycle cell.Lifecycle) (*MapSpecRegistry, error) {
-	spec, err := ebpf.LoadCollectionSpecFromReader(bytes.NewReader(bpfMapsELF))
+	mapSpecs, err := LoadMapSpecs()
 	if err != nil {
 		return nil, err
 	}
 
 	reg := &MapSpecRegistry{
-		mapSpecs: spec.Maps,
+		mapSpecs: mapSpecs,
 	}
 
 	lifecycle.Append(reg)
