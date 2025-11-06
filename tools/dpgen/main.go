@@ -4,37 +4,79 @@
 package main
 
 import (
-	"flag"
 	"fmt"
+	"maps"
 	"os"
+	"path"
+	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/btf"
+	"github.com/spf13/cobra"
 )
 
-var path, kind, name, embed, out string
+var inPath, kind, name, embed, out, pkg string
 var embeds []string
 
-func init() {
-	flag.StringVar(&path, "path", "", "path to the eBPF collection")
-	flag.StringVar(&out, "out", "", "output Go file for the generated config struct")
-	flag.StringVar(&kind, "kind", "object", "kind of the eBPF collection (object or node)")
-	flag.StringVar(&name, "name", "", "name of the generated Go struct")
-	flag.StringVar(&embed, "embed", "", "comma-separated list of structs to embed")
-
-	flag.Parse()
-
-	if embed != "" {
-		embeds = strings.Split(embed, ",")
+func main() {
+	var rootCmd = &cobra.Command{
+		Use:   "dpgen",
+		Short: "dpgen generates go code from eBPF datapath objects",
 	}
 
-	validate()
+	rootCmd.AddCommand(configCmd())
+	rootCmd.AddCommand(mapsCmd())
+
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(1)
+	}
 }
 
-func main() {
-	spec, err := ebpf.LoadCollectionSpec(path)
+func configCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "config",
+		Short: "Generates a configuration struct from an eBPF datapath object",
+		RunE:  runConfig,
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if embed != "" {
+				embeds = strings.Split(embed, ",")
+			}
+
+			if inPath == "" {
+				return fmt.Errorf("path cannot be empty")
+			}
+
+			if name == "" {
+				return fmt.Errorf("name cannot be empty")
+			}
+
+			if out == "" {
+				return fmt.Errorf("out cannot be empty")
+			}
+
+			if kind != "object" && kind != "node" {
+				return fmt.Errorf("kind needs to be 'object' or 'node'")
+			}
+			return nil
+		},
+	}
+
+	flags := c.Flags()
+	flags.StringVar(&inPath, "path", "", "path to the eBPF collection")
+	flags.StringVar(&out, "out", "", "output Go file for the generated config struct")
+	flags.StringVar(&kind, "kind", "object", "kind of the eBPF collection (object or node)")
+	flags.StringVar(&name, "name", "", "name of the generated Go struct")
+	flags.StringVar(&embed, "embed", "", "comma-separated list of structs to embed")
+
+	return c
+}
+
+func runConfig(cmd *cobra.Command, args []string) error {
+	spec, err := ebpf.LoadCollectionSpec(inPath)
 	if err != nil {
-		errexit(fmt.Errorf("loading spec: %w", err))
+		return fmt.Errorf("loading spec: %w", err)
 	}
 
 	comment := fmt.Sprintf("%s is a configuration struct for a Cilium datapath object. "+
@@ -42,7 +84,7 @@ func main() {
 		"values configured in the ELF are honored.", name, name)
 	s, err := varsToStruct(spec, name, kind, comment, embeds)
 	if err != nil {
-		errexit(fmt.Errorf("generating config struct: %w", err))
+		return fmt.Errorf("generating config struct: %w", err)
 	}
 
 	var b strings.Builder
@@ -56,31 +98,251 @@ func main() {
 	b.WriteString(s)
 
 	os.WriteFile(out, []byte(b.String()), 0644)
+
+	return nil
 }
 
-func validate() {
-	if path == "" {
-		exit("path cannot be empty")
+func mapsCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "maps {path to object files...}",
+		Short: "Generates Go code for eBPF maps from a datapath objects",
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if out == "" {
+				return fmt.Errorf("out cannot be empty")
+			}
+			return nil
+		},
+		RunE: runMaps,
+		Args: cobra.MinimumNArgs(1),
 	}
 
-	if name == "" {
-		exit("name cannot be empty")
-	}
+	flags := c.Flags()
+	flags.StringVar(&out, "out", "", "output directory for the generated Go file and BTF blob")
+	flags.StringVar(&pkg, "package", "maps", "name of the Go package")
 
-	if out == "" {
-		exit("out cannot be empty")
-	}
-
-	if kind != "object" && kind != "node" {
-		exit("kind needs to be 'object' or 'node'")
-	}
+	return c
 }
 
-func exit(s string) {
-	fmt.Fprintln(os.Stderr, s)
-	os.Exit(1)
+func runMaps(cmd *cobra.Command, args []string) error {
+	outerSpecsMap := make(map[string]*ebpf.MapSpec)
+	innerSpecsMap := make(map[string]*ebpf.MapSpec)
+	combinedBTF := &deduplicatingBtfBuilder{
+		names: make(map[typeKey]int),
+	}
+
+	for _, inPath := range args {
+		spec, err := ebpf.LoadCollectionSpec(inPath)
+		if err != nil {
+			return fmt.Errorf("loading spec from %s: %w", inPath, err)
+		}
+
+		for _, name := range slices.Sorted(maps.Keys(spec.Maps)) {
+			mapSpec := spec.Maps[name]
+			if strings.HasPrefix(mapSpec.Name, ".rodata") || strings.HasPrefix(mapSpec.Name, ".data") ||
+				strings.HasPrefix(mapSpec.Name, ".bss") {
+				continue
+			}
+
+			outerSpecsMap[mapSpec.Name] = mapSpec
+			if mapSpec.Key != nil {
+				err = combinedBTF.Add(mapSpec.Key)
+				if err != nil {
+					return fmt.Errorf("adding key BTF for map %s: %w", mapSpec.Name, err)
+				}
+			}
+			if mapSpec.Value != nil {
+				err = combinedBTF.Add(mapSpec.Value)
+				if err != nil {
+					return fmt.Errorf("adding value BTF for map %s: %w", mapSpec.Name, err)
+				}
+			}
+			if mapSpec.InnerMap != nil {
+				innerSpecsMap[mapSpec.InnerMap.Name] = mapSpec.InnerMap
+
+				if mapSpec.InnerMap.Key != nil {
+					err = combinedBTF.Add(mapSpec.InnerMap.Key)
+					if err != nil {
+						return fmt.Errorf("adding key BTF for inner map %s: %w", mapSpec.InnerMap.Name, err)
+					}
+				}
+				if mapSpec.InnerMap.Value != nil {
+					err = combinedBTF.Add(mapSpec.InnerMap.Value)
+					if err != nil {
+						return fmt.Errorf("adding value BTF for inner map %s: %w", mapSpec.InnerMap.Name, err)
+					}
+				}
+			}
+		}
+	}
+
+	btfBlob, err := combinedBTF.Marshal()
+	if err != nil {
+		return fmt.Errorf("marshaling combined BTF: %w", err)
+	}
+	os.WriteFile(path.Join(out, "maps.btf"), btfBlob, 0644)
+
+	sortByName := func(a, b *ebpf.MapSpec) int {
+		return strings.Compare(a.Name, b.Name)
+	}
+	outerSpecs := slices.SortedFunc(maps.Values(outerSpecsMap), sortByName)
+
+	combinedSpecs := append(slices.Collect(maps.Values(innerSpecsMap)), outerSpecs...)
+	slices.SortFunc(combinedSpecs, sortByName)
+
+	lit, err := renderMapSpecs(outerSpecs, combinedSpecs, pkg)
+	if err != nil {
+		return fmt.Errorf("generating Go literal for map %s: %w", name, err)
+	}
+
+	os.WriteFile(path.Join(out, "maps.go"), []byte(lit), 0644)
+
+	return nil
 }
 
-func errexit(err error) {
-	exit(err.Error())
+type typeKey struct {
+	kind string
+	name string
+}
+
+type deduplicatingBtfBuilder struct {
+	types []btf.Type
+	names map[typeKey]int
+}
+
+func (b *deduplicatingBtfBuilder) Add(t btf.Type) error {
+	b.findOrAdd(t, nil)
+	return nil
+}
+
+func (b *deduplicatingBtfBuilder) Marshal() ([]byte, error) {
+	builder, err := btf.NewBuilder(b.types)
+	if err != nil {
+		return nil, err
+	}
+
+	return builder.Marshal(nil, nil)
+}
+
+func (b *deduplicatingBtfBuilder) findOrAdd(t btf.Type, visited []btf.Type) btf.Type {
+	if slices.Contains(visited, t) {
+		return t
+	}
+	visited = append(visited, t)
+
+	key := typeKey{
+		kind: reflect.TypeOf(t).Elem().Name(),
+		name: t.TypeName(),
+	}
+
+	// Handle types without names
+	if t.TypeName() == "" {
+		switch t := t.(type) {
+		case *btf.Int:
+			for _, existing := range b.types {
+				if et, ok := existing.(*btf.Int); ok {
+					if et.Size == t.Size && et.Encoding == t.Encoding {
+						return et
+					}
+				}
+			}
+			goto addType
+
+		case *btf.Array:
+			idxTyp := b.findOrAdd(t.Index, visited)
+			elemTyp := b.findOrAdd(t.Type, visited)
+
+			for _, existing := range b.types {
+				if et, ok := existing.(*btf.Array); ok {
+					if et.Index == idxTyp && et.Type == elemTyp && et.Nelems == t.Nelems {
+						return et
+					}
+				}
+			}
+
+			goto addType
+
+		case *btf.Struct:
+			memberTypes := make([]btf.Type, len(t.Members))
+			for i, member := range t.Members {
+				memberTypes[i] = b.findOrAdd(member.Type, visited)
+			}
+
+			for _, existing := range b.types {
+				if et, ok := existing.(*btf.Struct); ok {
+					if len(et.Members) != len(t.Members) {
+						continue
+					}
+
+					matched := true
+					for i, member := range et.Members {
+						if member.Type != memberTypes[i] || member.Offset != t.Members[i].Offset {
+							matched = false
+							break
+						}
+					}
+					if matched {
+						return et
+					}
+				}
+			}
+
+			goto addType
+		case *btf.Union:
+			memberTypes := make([]btf.Type, len(t.Members))
+			for i, member := range t.Members {
+				memberTypes[i] = b.findOrAdd(member.Type, visited)
+			}
+
+			for _, existing := range b.types {
+				if et, ok := existing.(*btf.Struct); ok {
+					if len(et.Members) != len(t.Members) {
+						continue
+					}
+
+					matched := true
+					for i, member := range et.Members {
+						if member.Type != memberTypes[i] || member.Offset != t.Members[i].Offset {
+							matched = false
+							break
+						}
+					}
+					if matched {
+						return et
+					}
+				}
+			}
+
+			goto addType
+		}
+
+		panic(fmt.Sprintf("unnamed type of kind %T encountered", t))
+	}
+
+	if idx, ok := b.names[key]; ok {
+		return b.types[idx]
+	}
+
+	switch t := t.(type) {
+	case *btf.Int:
+	case *btf.Struct:
+		for i, member := range t.Members {
+			t.Members[i].Type = b.findOrAdd(member.Type, visited)
+		}
+	case *btf.Union:
+		for i, member := range t.Members {
+			t.Members[i].Type = b.findOrAdd(member.Type, visited)
+		}
+	case *btf.Typedef:
+		t.Type = b.findOrAdd(t.Type, visited)
+	default:
+		panic(fmt.Sprintf("unknown named type: %T", t))
+	}
+
+addType:
+	if t.TypeName() != "" {
+		b.names[key] = len(b.types)
+	}
+
+	b.types = append(b.types, t)
+	return t
 }
