@@ -824,6 +824,12 @@ func InitGlobalFlags(logger *slog.Logger, cmd *cobra.Command, vp *viper.Viper) {
 	flags.MarkHidden(option.EnableCiliumNodeCRDName)
 	option.BindEnv(vp, option.EnableCiliumNodeCRDName)
 
+	flags.Bool(option.EnableTunnelMultipathRouting, defaults.EnableTunnelMultipathRouting, "Enable multi path routing for tunnel traffic")
+	option.BindEnv(vp, option.EnableTunnelMultipathRouting)
+
+	flags.StringSlice(option.TunnelMultipathDevices, nil, "A list of devices used for sending multipath tunnel traffic")
+	option.BindEnv(vp, option.TunnelMultipathDevices)
+
 	if err := vp.BindPFlags(flags); err != nil {
 		logging.Fatal(logger, "BindPFlags failed", logfields.Error, err)
 	}

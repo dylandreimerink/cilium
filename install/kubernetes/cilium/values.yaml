@@ -3051,6 +3051,12 @@ routingMode: ""
 # -- Configure VXLAN and Geneve tunnel port.
 # @default -- Port 8472 for VXLAN, Port 6081 for Geneve
 tunnelPort: 0
+# -- Enable multipath routing for tunnels. When enabled, Cilium will use the router IPs of remote nodes 
+#    as the tunnel endpoint instead of the node IP, which allows that traffic to be routed over multiple interfaces.
+enableTunnelMultipathRouting: false
+# -- List of devices to be used for multipath routing when not empty, Cilium will create multipath routes for the
+#    router IPs via the specified devices.
+tunnelMultipathDevices: []
 # -- Configure VXLAN and Geneve tunnel source port range hint.
 # @default -- 0-0 to let the kernel driver decide the range
 tunnelSourcePortRange: 0-0

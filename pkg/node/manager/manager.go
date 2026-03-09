@@ -87,6 +87,8 @@ type IPCache interface {
 	RemoveIdentityOverride(prefix cmtypes.PrefixCluster, identityLabels labels.Labels, resource ipcacheTypes.ResourceID)
 	UpsertMetadataBatch(updates ...ipcache.MU) (revision uint64)
 	RemoveMetadataBatch(updates ...ipcache.MU) (revision uint64)
+	UpsertTunnelEndpointMapping(from, to net.IP)
+	DeleteTunnelEndpointMapping(from net.IP)
 }
 
 // IPSetFilterFn is a function allowing to optionally filter out the insertion
@@ -785,6 +787,11 @@ func (m *manager) NodeUpdated(n nodeTypes.Node) {
 	// the nodeIP as the tunnel endpoint (no tunnel endpoint fallback is needed
 	// for the local node).
 	if !n.IsLocal() {
+		if m.conf.EnableTunnelMultipathRouting {
+			internalIPv4 := n.GetCiliumInternalIP(false)
+			m.ipcache.UpsertTunnelEndpointMapping(nodeIP.AsSlice(), internalIPv4)
+		}
+
 		ipv4PodCIDRs := n.GetIPv4AllocCIDRs()
 		ipv6PodCIDRs := n.GetIPv6AllocCIDRs()
 
@@ -1079,6 +1086,8 @@ func (m *manager) removeNodeFromIPCache(oldNode nodeTypes.Node, resource ipcache
 			ipcacheTypes.TunnelPeer{Addr: oldNodeIP},
 			m.endpointEncryptionKey(&oldNode))
 	}
+
+	m.ipcache.DeleteTunnelEndpointMapping(oldNodeIP.AsSlice())
 }
 
 // NodeDeleted is called after a node has been deleted. It removes the node

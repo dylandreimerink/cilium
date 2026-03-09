@@ -1901,6 +1901,9 @@
     "enableTunnelBIGTCP": {
       "type": "boolean"
     },
+    "enableTunnelMultipathRouting": {
+      "type": "boolean"
+    },
     "enableXTSocketFallback": {
       "type": "boolean"
     },
@@ -6419,6 +6422,10 @@
           }
         ]
       },
+      "type": "array"
+    },
+    "tunnelMultipathDevices": {
+      "items": {},
       "type": "array"
     },
     "tunnelPort": {

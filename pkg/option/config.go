@@ -991,6 +991,12 @@ const (
 
 	// EnableCiliumNodeCRD is the name of the option to enable use of the CiliumNode CRD
 	EnableCiliumNodeCRDName = "enable-ciliumnode-crd"
+
+	// EnableTunnelMultipathRouting enables multipath routing for tunnel traffic.
+	EnableTunnelMultipathRouting = "enable-tunnel-multipath-routing"
+
+	// TunnelMultipathDevices is a list of devices to use for multipath routing of tunnel traffic.
+	TunnelMultipathDevices = "tunnel-multipath-devices"
 )
 
 // Default string arguments
@@ -1852,6 +1858,12 @@ type DaemonConfig struct {
 
 	// EnableCiliumNodeCRD enables the use of CiliumNode CRD
 	EnableCiliumNodeCRD bool
+
+	// EnableTunnelMultipathRouting enables multipath routing for tunnel traffic.
+	EnableTunnelMultipathRouting bool
+
+	// TunnelMultipathDevices is the list of devices to use for tunnel multipath routing.
+	TunnelMultipathDevices []string
 }
 
 var (
@@ -1911,6 +1923,8 @@ var (
 		EnableCiliumNodeCRD: defaults.EnableCiliumNodeCRD,
 
 		PolicyAccounting: defaults.PolicyAccounting,
+
+		EnableTunnelMultipathRouting: defaults.EnableTunnelMultipathRouting,
 	}
 )
 
@@ -2505,6 +2519,8 @@ func (c *DaemonConfig) Populate(logger *slog.Logger, vp *viper.Viper) {
 	c.BootIDFile = vp.GetString(BootIDFilename)
 	c.EnableExtendedIPProtocols = vp.GetBool(EnableExtendedIPProtocols)
 	c.IPTracingOptionType = vp.GetUint(IPTracingOptionType)
+	c.EnableTunnelMultipathRouting = vp.GetBool(EnableTunnelMultipathRouting)
+	c.TunnelMultipathDevices = vp.GetStringSlice(TunnelMultipathDevices)
 	c.ServiceNoBackendResponse = vp.GetString(ServiceNoBackendResponse)
 	switch c.ServiceNoBackendResponse {
 	case ServiceNoBackendResponseReject, ServiceNoBackendResponseDrop:

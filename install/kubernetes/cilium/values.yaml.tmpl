@@ -2420,6 +2420,13 @@ enableIPv6BIGTCP: false
 # -- Enable BIG TCP in tunneling mode and increase maximum GRO/GSO limits for VXLAN/GENEVE tunnels
 enableTunnelBIGTCP: false
 
+# -- Enable multipath routing for tunnels. When enabled, Cilium will use the router IPs of remote nodes 
+#    as the tunnel endpoint instead of the node IP, which allows that traffic to be routed over multiple interfaces.
+enableTunnelMultipathRouting: false
+# -- List of devices to be used for multipath routing when not empty, Cilium will create multipath routes for the
+#    router IPs via the specified devices.
+tunnelMultipathDevices: []
+
 nat:
   # -- Number of the top-k SNAT map connections to track in Cilium statedb.
   mapStatsEntries: 32

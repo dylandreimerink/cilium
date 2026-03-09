@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"regexp"
 	"sync"
 	"syscall"
 
@@ -454,6 +455,52 @@ func (n *linuxNodeHandler) updateOrRemoveNodeRoutes(old, new []*cidr.CIDR, isLoc
 	return errs
 }
 
+func (n *linuxNodeHandler) updateMultipathTunnelRoute(newNode *nodeTypes.Node) error {
+	var patterns []*regexp.Regexp
+	for _, device := range option.Config.TunnelMultipathDevices {
+		pattern, err := regexp.Compile(fmt.Sprintf("^%s$", device))
+		if err != nil {
+			return fmt.Errorf("failed to compile regex pattern for tunnel multipath device %s: %w", device, err)
+		}
+
+		patterns = append(patterns, pattern)
+	}
+
+	r := netlink.Route{
+		Dst:      &net.IPNet{IP: newNode.GetCiliumInternalIP(false), Mask: net.CIDRMask(32, 32)},
+		Protocol: linux_defaults.RTProto,
+	}
+	links, err := netlink.LinkList()
+	if err != nil {
+		return fmt.Errorf("failed to list network links for tunnel multipath routing: %w", err)
+	}
+
+linkLoop:
+	for _, link := range links {
+		for _, pattern := range patterns {
+			if pattern.MatchString(link.Attrs().Name) {
+				r.MultiPath = append(r.MultiPath, &netlink.NexthopInfo{
+					LinkIndex: link.Attrs().Index,
+				})
+				continue linkLoop
+			}
+		}
+	}
+	if len(r.MultiPath) > 0 {
+		if err = netlink.RouteReplace(&r); err != nil {
+			return fmt.Errorf("failed to replace multipath route for node %s: %w", newNode.Name, err)
+		}
+	}
+	return nil
+}
+
+func (n *linuxNodeHandler) deleteMultipathTunnelRoute(oldNode *nodeTypes.Node) error {
+	return netlink.RouteDel(&netlink.Route{
+		Dst:      &net.IPNet{IP: oldNode.GetCiliumInternalIP(false), Mask: net.CIDRMask(32, 32)},
+		Protocol: linux_defaults.RTProto,
+	})
+}
+
 func (n *linuxNodeHandler) NodeAdd(newNode nodeTypes.Node) error {
 	n.mutex.Lock()
 	defer n.mutex.Unlock()
@@ -572,6 +619,12 @@ func (n *linuxNodeHandler) nodeUpdate(oldNode, newNode *nodeTypes.Node, firstAdd
 		}
 	}
 
+	if option.Config.EnableTunnelMultipathRouting && len(option.Config.TunnelMultipathDevices) > 0 {
+		if err := n.updateMultipathTunnelRoute(newNode); err != nil {
+			errs = errors.Join(errs, fmt.Errorf("failed to update multipath tunnel route: %w", err))
+		}
+	}
+
 	return errs
 }
 
@@ -650,6 +703,12 @@ func (n *linuxNodeHandler) nodeDelete(oldNode *nodeTypes.Node) error {
 
 	if err := n.deallocateIDForNode(oldNode); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("failed to deallocate old node ID: %w", err))
+	}
+
+	if option.Config.EnableTunnelMultipathRouting && len(option.Config.TunnelMultipathDevices) > 0 {
+		if err := n.deleteMultipathTunnelRoute(oldNode); err != nil {
+			errs = errors.Join(errs, fmt.Errorf("failed to update multipath tunnel route: %w", err))
+		}
 	}
 
 	return errs
