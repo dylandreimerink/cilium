@@ -108,6 +108,7 @@ type Configuration struct {
 	cache.IdentityAllocator
 	ipcacheTypes.IdentityUpdater
 	synced.CacheStatus
+	EnableFloatingTunnelEndpoint bool
 }
 
 // IPCache is a collection of mappings:
@@ -115,15 +116,17 @@ type Configuration struct {
 //     which are part of the same cluster, and vice-versa
 //   - mapping of endpoint IP or CIDR to host IP (maybe nil)
 type IPCache struct {
-	logger            *slog.Logger
-	mutex             lock.SemaphoredMutex
-	ipToIdentityCache map[string]Identity
-	identityToIPCache map[identity.NumericIdentity]map[string]struct{}
-	ipToHostIPCache   map[string]IPKeyPair
-	ipToK8sMetadata   map[string]K8sMetadata
-	ipToEndpointFlags map[string]uint8
+	logger             *slog.Logger
+	mutex              lock.SemaphoredMutex
+	ipToIdentityCache  map[string]Identity
+	identityToIPCache  map[identity.NumericIdentity]map[string]struct{}
+	ipToHostIPCache    map[string]IPKeyPair
+	ipToK8sMetadata    map[string]K8sMetadata
+	ipToEndpointFlags  map[string]uint8
+	ipToTunnelEndpoint map[string]net.IP
 
-	listeners []IPIdentityMappingListener
+	listeners               []IPIdentityMappingListener
+	tunnelEndpointListeners []TunnelEndpointMappingListener
 
 	// controllers manages the async controllers for this IPCache
 	controllers *controller.Manager
@@ -643,6 +646,11 @@ func (ipc *IPCache) dumpToListenerLocked(listener IPIdentityMappingListener) {
 			continue
 		}
 		hostIP, encryptKey := ipc.getHostIPCacheRLocked(ip)
+		if ipc.Configuration.EnableFloatingTunnelEndpoint && hostIP != nil {
+			if mappedIP, ok := ipc.ipToTunnelEndpoint[hostIP.String()]; ok {
+				hostIP = mappedIP
+			}
+		}
 		k8sMeta := ipc.getK8sMetadata(ip)
 		endpointFlags := ipc.getEndpointFlagsRLocked(ip)
 		cidrCluster, err := cmtypes.ParsePrefixCluster(ip)
@@ -919,6 +927,50 @@ func (ipc *IPCache) LookupByHostRLocked(hostIPv4, hostIPv6 net.IP) (cidrs []net.
 		}
 	}
 	return cidrs
+}
+
+// TunnelEndpointMappingListener represents a component that is interested in
+// floating tunnel endpoint mapping changes.
+type TunnelEndpointMappingListener interface {
+	OnTunnelEndpointMappingUpsert(from, to net.IP)
+	OnTunnelEndpointMappingDelete(from net.IP)
+}
+
+// AddTunnelEndpointMappingListener adds a listener for tunnel endpoint mapping changes.
+func (ipc *IPCache) AddTunnelEndpointMappingListener(listener TunnelEndpointMappingListener) {
+	ipc.mutex.Lock()
+	defer ipc.mutex.RUnlock()
+	ipc.tunnelEndpointListeners = append(ipc.tunnelEndpointListeners, listener)
+}
+
+func (ipc *IPCache) UpsertTunnelEndpointMapping(from, to net.IP) {
+	ipc.mutex.Lock()
+	defer ipc.mutex.Unlock()
+	ipc.ipToTunnelEndpoint[from.String()] = to
+	ipc.mutex.UnlockToRLock()
+
+	for _, listener := range ipc.tunnelEndpointListeners {
+		listener.OnTunnelEndpointMappingUpsert(from, to)
+	}
+}
+
+func (ipc *IPCache) GetTunnelEndpointMapping(from net.IP) (to net.IP, ok bool) {
+	ipc.mutex.RLock()
+	defer ipc.mutex.RUnlock()
+	to, ok = ipc.ipToTunnelEndpoint[from.String()]
+	return to, ok
+}
+
+func (ipc *IPCache) DeleteTunnelEndpointMapping(from net.IP) {
+	ipc.mutex.Lock()
+	defer ipc.mutex.Unlock()
+	delete(ipc.ipToTunnelEndpoint, from.String())
+
+	ipc.mutex.UnlockToRLock()
+
+	for _, listener := range ipc.tunnelEndpointListeners {
+		listener.OnTunnelEndpointMappingDelete(from)
+	}
 }
 
 // Equal returns true if two K8sMetadata pointers contain the same data or are
